@@ -235,7 +235,7 @@ public partial class ClipboardTab : UserControl
         catch (Exception) { PreviewMeta.Text = "Couldn't open that link."; }
     }
 
-    private static BitmapImage? MakeQr(string text)
+    internal static BitmapImage? MakeQr(string text)
     {
         try
         {

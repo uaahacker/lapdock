@@ -46,6 +46,10 @@
             <TextBlock Text="Display" Style="{StaticResource Section}"/>
             <WrapPanel x:Name="Displays"/>
 
+            <TextBlock Text="When an app reaches the top of the screen" Style="{StaticResource Section}"/>
+            <WrapPanel x:Name="SpaceChoices"/>
+            <TextBlock x:Name="SpaceHelp" FontSize="11.5" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+
             <TextBlock Text="Weather" Style="{StaticResource Section}"/>
             <DockPanel>
                 <Button DockPanel.Dock="Right" Content="Apply" Style="{StaticResource PrimaryPill}" Padding="16,6" FontSize="12" Margin="8,0,0,0" Click="ApplyCity_Click"/>
@@ -78,7 +82,10 @@
             <CheckBox Style="{StaticResource Switch}" Content="Microphone in use" IsChecked="{Binding MicrophoneIndicator}" Click="Changed_Click"/>
             <CheckBox Style="{StaticResource Switch}" Content="Camera in use" IsChecked="{Binding CameraIndicator}" Click="Changed_Click"/>
             <CheckBox Style="{StaticResource Switch}" Content="Music" IsChecked="{Binding MediaControls}" Click="Changed_Click"/>
-            <CheckBox Style="{StaticResource Switch}" Content="Live messages (charging, volume, screenshot saved…)" IsChecked="{Binding DynamicNotifications}" Click="Changed_Click"/>
+            <CheckBox Style="{StaticResource Switch}" Content="Live messages (charging, downloads, devices, volume…)" IsChecked="{Binding DynamicNotifications}" Click="Changed_Click"/>
+            <CheckBox Style="{StaticResource Switch}" Content="Notifications from apps (Teams, WhatsApp, Discord…)" IsChecked="{Binding AppNotifications}" Click="Changed_Click"/>
+            <TextBlock FontSize="11.5" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2,0,6"
+                       Text="To see them only in the notch, turn off an app's banners in Windows Settings → System → Notifications (they stay in the notification center)."/>
             <TextBlock FontSize="11.5" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2,0,0"
                        Text="Turning Battery, Microphone, Camera or Music back on takes effect the next time LapDock starts."/>
 

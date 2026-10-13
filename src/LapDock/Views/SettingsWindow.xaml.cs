@@ -60,6 +60,7 @@ public partial class SettingsWindow : Window
         AboutText.Text = installed ? $"Version {InstallService.Version}" : $"Version {InstallService.Version} · running without installing";
         UninstallButton.Visibility = installed ? Visibility.Visible : Visibility.Collapsed;
         BuildDisplays();
+        BuildSpaceChoices();
         // Never taller than the screen it opens on (it scrolls instead).
         MaxHeight = screen.WorkingArea.Height / (VisualTreeHelper.GetDpi(this).DpiScaleY is > 0 and var k ? k : 1) - 40;
         Show(); // still at Opacity 0: placing after Show lets a DPI change between displays rescale it first
@@ -104,6 +105,31 @@ public partial class SettingsWindow : Window
                 BuildDisplays();
             };
             Displays.Children.Add(pill);
+        }
+    }
+
+    private static readonly (string Value, string Label, string Help)[] SpaceModes =
+    {
+        ("Reserve", "Make room", "A thin strip at the top stays free for the notch: maximised apps (Chrome's tabs, title-bar buttons) start just below it. Nothing is ever covered."),
+        ("AutoHide", "Hide when covered", "While an app's window is under the notch, it slides away and clicks go to the app. Push the mouse against the top edge, in the middle, to open it."),
+        ("Overlay", "Stay on top", "The notch floats over everything, as before. It can cover the top of maximised apps."),
+    };
+
+    private void BuildSpaceChoices()
+    {
+        SpaceChoices.Children.Clear();
+        foreach (var (value, label, help) in SpaceModes)
+        {
+            bool on = _settings.NotchSpace == value;
+            var pill = new Button { Content = label, Style = (Style)FindResource("OptionPill"), Tag = on ? "on" : null };
+            if (on) SpaceHelp.Text = help;
+            pill.Click += (_, _) =>
+            {
+                _settings.NotchSpace = value;
+                Save();
+                BuildSpaceChoices();
+            };
+            SpaceChoices.Children.Add(pill);
         }
     }
 
