@@ -32,15 +32,21 @@ public static class ScreenService
     /// SetWindowPos works in PHYSICAL pixels: WPF Left/Top are DIPs, which land wrong on the
     /// 125%/150%-scaled panels laptops ship with.
     /// </summary>
-    public static void PlaceTopCenter(Window window, Forms.Screen screen)
+    public static void PlaceTopCenter(Window window, Forms.Screen screen) => Place(window, screen, middle: false);
+
+    /// <summary>Centres the window on the display's working area (the island panel).</summary>
+    public static void PlaceCenter(Window window, Forms.Screen screen) => Place(window, screen, middle: true);
+
+    private static void Place(Window window, Forms.Screen screen, bool middle)
     {
         var h = Handle(window);
-        var b = screen.Bounds;
+        var b = middle ? screen.WorkingArea : screen.Bounds;
         // Land on the target display first: if its scaling differs, WM_DPICHANGED rescales
-        // the window right now, so its real physical width is known before centring.
+        // the window right now, so its real physical size is known before centring.
         SetWindowPos(h, IntPtr.Zero, b.Left, b.Top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
         GetWindowRect(h, out var r);
-        SetWindowPos(h, IntPtr.Zero, b.Left + (b.Width - (r.Right - r.Left)) / 2, b.Top, 0, 0,
+        int top = middle ? b.Top + Math.Max(0, (b.Height - (r.Bottom - r.Top)) / 2) : b.Top;
+        SetWindowPos(h, IntPtr.Zero, b.Left + (b.Width - (r.Right - r.Left)) / 2, top, 0, 0,
             SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
 

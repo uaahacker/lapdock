@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using System.Windows.Media.Imaging;
 
 namespace LapDock.Services;
@@ -16,7 +18,8 @@ public static class WallpaperService
 {
     public static readonly string[] Extensions = { ".jpg", ".jpeg", ".png", ".bmp", ".webp", ".jfif", ".gif", ".tif", ".tiff" };
 
-    private static readonly ConcurrentDictionary<(string, DateTime), BitmapSource?> Thumbs = new();
+    private static readonly ConcurrentDictionary<(string, DateTime, int), BitmapSource?> Thumbs = new();
+    private static readonly string ThumbDir = Path.Combine(SettingsService.Dir, "thumbs");
 
     /// <summary>Current picture wallpaper, or null for a solid colour / Spotlight / unreadable.</summary>
     public static string? Current()
@@ -66,64 +69,96 @@ public static class WallpaperService
         finally { Marshal.ReleaseComObject(wp); }
     });
 
-    /// <summary>
-    /// "Next": the next picture (by name) in the current wallpaper's folder; if that folder
-    /// has no other pictures, the next one in the recent list. Null when there is nowhere to go.
-    /// </summary>
-    public static string? Next(string? current, IReadOnlyList<string> recent)
-    {
-        try
-        {
-            if (current is not null && Path.GetDirectoryName(current) is { } dir)
-            {
-                var siblings = Directory.EnumerateFiles(dir)
-                    .Where(IsImage)
-                    .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-                if (siblings.Count > 1)
-                {
-                    int i = siblings.FindIndex(f => f.Equals(current, StringComparison.OrdinalIgnoreCase));
-                    return siblings[(i + 1) % siblings.Count];
-                }
-            }
-        }
-        catch (Exception) { /* unreadable folder — fall through to recents */ }
-
-        var others = recent.Where(File.Exists).ToList();
-        if (others.Count == 0) return null;
-        int at = current is null ? -1 : others.FindIndex(f => f.Equals(current, StringComparison.OrdinalIgnoreCase));
-        var next = others[(at + 1) % others.Count];
-        return next.Equals(current, StringComparison.OrdinalIgnoreCase) ? null : next;
-    }
-
     public static bool IsImage(string path) =>
         Extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Small decoded preview, cached per file version. Null if the image can't be decoded.</summary>
+    /// <summary>
+    /// Decoded preview, cached per file version and size. Thumbnails (≤ 400 px) are also kept as small
+    /// JPEGs in %AppData%/LapDock/thumbs, so a grid of 100+ pictures fills quickly after a restart.
+    /// ponytail: that folder is never pruned (a few KB per picture); clear it if it ever matters.
+    /// </summary>
     public static Task<BitmapSource?> Thumbnail(string path, int width) => Task.Run(() =>
     {
         try
         {
-            var key = (path, File.GetLastWriteTimeUtc(path));
-            return Thumbs.GetOrAdd(key, _ =>
-            {
-                try
-                {
-                    var image = new BitmapImage();
-                    image.BeginInit();
-                    image.UriSource = new Uri(path);
-                    image.DecodePixelWidth = width; // decode small: a 4K wallpaper never sits in memory
-                    image.CacheOption = BitmapCacheOption.OnLoad;
-                    image.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
-                    image.EndInit();
-                    image.Freeze();
-                    return image;
-                }
-                catch (Exception) { return null; }
-            });
+            var stamp = File.GetLastWriteTimeUtc(path);
+            return Thumbs.GetOrAdd((path, stamp, width), _ => LoadThumbnail(path, stamp, width));
         }
         catch (Exception) { return null; }
     });
+
+    private static BitmapSource? LoadThumbnail(string path, DateTime stamp, int width)
+    {
+        bool small = width <= 400;
+        var cached = Path.Combine(ThumbDir, Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes($"{path}|{stamp.Ticks}|{width}"))) + ".jpg");
+        if (small && File.Exists(cached) && Decode(cached, 0) is { } hit) return hit;
+        var image = Decode(path, width);
+        if (image is null || !small) return image;
+        try
+        {
+            Directory.CreateDirectory(ThumbDir);
+            var encoder = new JpegBitmapEncoder { QualityLevel = 85 };
+            encoder.Frames.Add(BitmapFrame.Create(image));
+            using var file = File.Create(cached);
+            encoder.Save(file);
+        }
+        catch (Exception) { /* no cache this time */ }
+        return image;
+    }
+
+    private static BitmapSource? Decode(string path, int width)
+    {
+        try
+        {
+            var image = new BitmapImage();
+            image.BeginInit();
+            image.UriSource = new Uri(path);
+            if (width > 0) image.DecodePixelWidth = width; // decode small: a 4K wallpaper never sits in memory
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            image.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
+            image.EndInit();
+            image.Freeze();
+            return image;
+        }
+        catch (Exception) { return null; }
+    }
+
+    /// <summary>
+    /// Pictures for the Wallpaper tab: recent ones first, then Pictures (top level), Pictures\Wallpapers,
+    /// Windows' own wallpapers, the current wallpaper's folder and any added folders. Skips files under
+    /// 40 KB (icons, thumbnails) and stops at 1,000 pictures.
+    /// </summary>
+    public static List<string> FindPictures(IEnumerable<string> addedFolders, IEnumerable<string> recent, string? current)
+    {
+        var pictures = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+        var sources = new List<(string Folder, int Depth)>
+        {
+            (pictures, 0),
+            (Path.Combine(pictures, "Wallpapers"), 3),
+            (Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Web", "Wallpaper"), 3),
+        };
+        if (Path.GetDirectoryName(current) is { } currentFolder) sources.Add((currentFolder, 0));
+        sources.AddRange(addedFolders.Select(f => (f, 3)));
+
+        var found = recent.Where(File.Exists).ToList();
+        foreach (var (folder, depth) in sources) Collect(folder, depth, found);
+        return found.Distinct(StringComparer.OrdinalIgnoreCase).Take(1000).ToList();
+    }
+
+    private static void Collect(string folder, int depth, List<string> found)
+    {
+        if (found.Count >= 1000 || !Directory.Exists(folder)) return;
+        try
+        {
+            found.AddRange(new DirectoryInfo(folder).EnumerateFiles()
+                .Where(f => IsImage(f.FullName) && f.Length >= 40_000 && (f.Attributes & FileAttributes.Hidden) == 0)
+                .OrderByDescending(f => f.LastWriteTimeUtc)
+                .Select(f => f.FullName));
+            if (depth > 0)
+                foreach (var sub in Directory.EnumerateDirectories(folder)) Collect(sub, depth - 1, found);
+        }
+        catch (Exception) { /* access denied: skip it */ }
+    }
 
     private static IDesktopWallpaper Create() => (IDesktopWallpaper)new DesktopWallpaperClass();
 

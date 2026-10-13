@@ -6,7 +6,8 @@ namespace LapDock.Services;
 
 public static class SettingsService
 {
-    private static readonly string Dir =
+    /// <summary>%AppData%/LapDock — settings.json plus the other stores (todos.json, events.json…).</summary>
+    public static readonly string Dir =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "LapDock");
     private static readonly string FilePath = Path.Combine(Dir, "settings.json");
 
@@ -17,8 +18,8 @@ public static class SettingsService
             if (File.Exists(FilePath))
             {
                 var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new AppSettings();
-                if (settings.PinnedApps.SequenceEqual(AppSettings.V01Pins))
-                    settings.PinnedApps = new AppSettings().PinnedApps;
+                if (settings.SummonHotkey == AppSettings.OldSummonHotkey)
+                    settings.SummonHotkey = AppSettings.DefaultSummonHotkey;
                 return settings;
             }
         }

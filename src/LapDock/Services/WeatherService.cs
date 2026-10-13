@@ -4,6 +4,7 @@ using System.Text.Json;
 namespace LapDock.Services;
 
 public readonly record struct WeatherInfo(double TempC, int Code, string Summary);
+public readonly record struct Place(string Name, string Country, double Latitude, double Longitude);
 
 /// <summary>Current weather from Open-Meteo — free, no API key, no signup.</summary>
 public static class WeatherService
@@ -24,6 +25,22 @@ public static class WeatherService
             return new WeatherInfo(temp, code, Describe(code));
         }
         catch { return null; } // offline is fine — the widget just shows "—"
+    }
+
+    /// <summary>A city name → coordinates (Open-Meteo geocoding, no key). Null when nothing matches or offline.</summary>
+    public static async Task<Place?> FindPlaceAsync(string name)
+    {
+        try
+        {
+            var url = "https://geocoding-api.open-meteo.com/v1/search?count=1&language=en&format=json&name=" + Uri.EscapeDataString(name);
+            using var doc = JsonDocument.Parse(await Http.GetStringAsync(url));
+            if (!doc.RootElement.TryGetProperty("results", out var results) || results.GetArrayLength() == 0) return null;
+            var r = results[0];
+            return new Place(r.GetProperty("name").GetString() ?? name,
+                r.TryGetProperty("country", out var country) ? country.GetString() ?? "" : "",
+                r.GetProperty("latitude").GetDouble(), r.GetProperty("longitude").GetDouble());
+        }
+        catch { return null; }
     }
 
     private static string Describe(int code) => code switch

@@ -10,7 +10,7 @@ public readonly record struct SystemStats(double CpuPercent, double RamPercent, 
 /// CPU is computed from GetSystemTimes deltas — no PerformanceCounter,
 /// no extra assemblies, works on a clean Windows install.
 /// </summary>
-public sealed class SystemStatsService
+public sealed class SystemStatsService : IDisposable
 {
     [StructLayout(LayoutKind.Sequential)]
     private struct FILETIME { public uint Low; public uint High; }
@@ -53,6 +53,29 @@ public sealed class SystemStatsService
         if (totalDiff == 0) return 0;
         return Math.Clamp(100.0 - idleDiff * 100.0 / totalDiff, 0, 100);
     }
+
+    private PdhCounter? _gpu;
+    private bool _gpuTried;
+
+    /// <summary>False when this machine exposes no GPU counters (common in VMs): the Stats tab drops the GPU gauge.</summary>
+    public bool HasGpu { get { OpenGpu(); return _gpu is not null; } }
+
+    /// <summary>3D-engine load summed over processes, like Task Manager's GPU column; null until two samples exist.</summary>
+    public double? GetGpuPercent()
+    {
+        OpenGpu();
+        var engines = _gpu?.Read();
+        return engines is { Count: > 0 } ? Math.Clamp(engines.Sum(e => e.Value), 0, 100) : null;
+    }
+
+    private void OpenGpu()
+    {
+        if (_gpuTried) return;
+        _gpuTried = true;
+        _gpu = PdhCounter.TryOpen(@"\GPU Engine(*engtype_3D)\Utilization Percentage");
+    }
+
+    public void Dispose() => _gpu?.Dispose();
 
     public SystemStats GetStats()
     {

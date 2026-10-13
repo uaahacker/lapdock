@@ -16,9 +16,9 @@ public static class ShellIconService
 
     private static readonly Dictionary<string, (ImageSource?, string?)> Cache = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Cached per target: the dock is rebuilt on every pin/unpin, the shell is asked once.</summary>
+    /// <summary>Cached per target and size: the dock is rebuilt on every pin/unpin, the shell is asked once.</summary>
     public static (ImageSource? Icon, string? Name) Get(string target, int size = 128) =>
-        Cache.TryGetValue(target, out var hit) ? hit : Cache[target] = Load(target, size);
+        Cache.TryGetValue($"{size}|{target}", out var hit) ? hit : Cache[$"{size}|{target}"] = Load(target, size);
 
     private static (ImageSource? Icon, string? Name) Load(string target, int size)
     {
