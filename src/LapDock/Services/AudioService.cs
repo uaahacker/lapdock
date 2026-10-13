@@ -14,6 +14,7 @@ public sealed class AudioService : IDisposable
     private static readonly Guid OurContext = Guid.NewGuid();
 
     private readonly Dispatcher _dispatcher;
+    private readonly EDataFlow _flow;
     private IMMDeviceEnumerator? _enumerator;
     private IAudioEndpointVolume? _endpoint;
     private readonly VolumeCallback _volumeCallback;
@@ -23,13 +24,17 @@ public sealed class AudioService : IDisposable
     /// <summary>0..1</summary>
     public float Volume { get; private set; }
     public bool Muted { get; private set; }
+    /// <summary>Friendly name of the default output, e.g. "Headphones (WH-1000XM4)".</summary>
+    public string? DeviceName { get; private set; }
 
     /// <summary>UI thread. true = changed outside LapDock (keyboard keys, other apps).</summary>
     public event Action<bool>? Changed;
 
-    public AudioService(Dispatcher dispatcher)
+    /// <param name="capture">true = the default microphone instead of the default speakers.</param>
+    public AudioService(Dispatcher dispatcher, bool capture = false)
     {
         _dispatcher = dispatcher;
+        _flow = capture ? EDataFlow.Capture : EDataFlow.Render;
         _volumeCallback = new VolumeCallback(this);
         _deviceCallback = new DeviceCallback(this);
     }
@@ -51,9 +56,10 @@ public sealed class AudioService : IDisposable
         if (_enumerator is null) return;
         try
         {
-            _enumerator.GetDefaultAudioEndpoint(EDataFlow.Render, ERole.Multimedia, out var device);
+            _enumerator.GetDefaultAudioEndpoint(_flow, ERole.Multimedia, out var device);
             var iid = typeof(IAudioEndpointVolume).GUID;
             device.Activate(ref iid, 0x17 /* CLSCTX_ALL */, IntPtr.Zero, out var obj);
+            DeviceName = FriendlyName(device);
             Marshal.ReleaseComObject(device);
             _endpoint = (IAudioEndpointVolume)obj;
             _endpoint.RegisterControlChangeNotify(_volumeCallback);
@@ -62,7 +68,7 @@ public sealed class AudioService : IDisposable
             Volume = v;
             Muted = m;
         }
-        catch (Exception) { _endpoint = null; } // no output device at all
+        catch (Exception) { _endpoint = null; DeviceName = null; } // no output device at all
         Changed?.Invoke(false);
     }
 
@@ -115,7 +121,34 @@ public sealed class AudioService : IDisposable
         _enumerator = null;
     }
 
+    private static string? FriendlyName(IMMDevice device)
+    {
+        IPropertyStore? store = null;
+        var pv = new PROPVARIANT();
+        try
+        {
+            device.OpenPropertyStore(0 /* STGM_READ */, out store);
+            var key = PKEY_Device_FriendlyName;
+            store.GetValue(ref key, out pv);
+            return pv.vt == 31 /* VT_LPWSTR */ ? Marshal.PtrToStringUni(pv.pointer) : null;
+        }
+        catch (Exception) { return null; }
+        finally
+        {
+            PropVariantClear(ref pv);
+            if (store is not null) Marshal.ReleaseComObject(store);
+        }
+    }
+
     // ------------------------------------------------------------------ interop
+    private static readonly PROPERTYKEY PKEY_Device_FriendlyName =
+        new() { fmtid = new Guid("A45C254E-DF1C-4EFD-8020-67D146A850E0"), pid = 14 };
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PROPVARIANT { public ushort vt; public ushort r1, r2, r3; public IntPtr pointer, pointer2; }
+
+    [DllImport("ole32.dll")] private static extern int PropVariantClear(ref PROPVARIANT pv);
+
     private sealed class VolumeCallback(AudioService owner) : IAudioEndpointVolumeCallback
     {
         public int OnNotify(IntPtr pNotify) { owner.OnNotify(pNotify); return 0; }
@@ -125,7 +158,7 @@ public sealed class AudioService : IDisposable
     {
         public int OnDefaultDeviceChanged(EDataFlow flow, ERole role, string? id)
         {
-            if (flow == EDataFlow.Render && role == ERole.Multimedia) owner._dispatcher.BeginInvoke(owner.Attach);
+            if (flow == owner._flow && role == ERole.Multimedia) owner._dispatcher.BeginInvoke(owner.Attach);
             return 0;
         }
         public int OnDeviceStateChanged(string id, uint state) => 0;
@@ -160,6 +193,15 @@ public sealed class AudioService : IDisposable
     private interface IMMDevice
     {
         void Activate(ref Guid iid, int clsCtx, IntPtr activationParams, [MarshalAs(UnmanagedType.IUnknown)] out object instance);
+        void OpenPropertyStore(int access, out IPropertyStore store);
+    }
+
+    [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IPropertyStore
+    {
+        void GetCount(out uint count);
+        void GetAt(uint index, out PROPERTYKEY key);
+        void GetValue(ref PROPERTYKEY key, out PROPVARIANT value);
     }
 
     [ComImport, Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]

@@ -23,7 +23,7 @@ public sealed class NowPlayingService : INotifyPropertyChanged, IDisposable
     private bool _disposed;
     private int _metadataRevision;
     private string _title = "Nothing playing";
-    private string _artist = "Open your favourite music player";
+    private string _artist = "Media keys still work";
     private string _album = "";
     private BitmapImage? _artwork;
     private bool _hasSession;
@@ -329,7 +329,7 @@ public sealed class NowPlayingService : INotifyPropertyChanged, IDisposable
     private void ResetValues()
     {
         Title = "Nothing playing";
-        Artist = "Open your favourite music player";
+        Artist = "Media keys still work";
         Album = "";
         Artwork = null;
         HasSession = IsPlaying = CanSeek = false;
