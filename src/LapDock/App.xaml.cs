@@ -26,6 +26,10 @@ public partial class App : Application
         Services.ClipboardService.SelfCheck();
         Services.AppCatalogService.SelfCheck();
         Services.FullscreenWatcher.SelfCheck();
+        Services.AppBarService.SelfCheck();
+        Services.DownloadWatcher.SelfCheck();
+        Services.BatteryHistory.SelfCheck();
+        Services.PhoneShareServer.SelfCheck();
         base.OnStartup(e);
         // A widget must not take itself down over one bad moment: log it and keep going.
         DispatcherUnhandledException += (_, ex) => { Log(ex.Exception); ex.Handled = true; };
