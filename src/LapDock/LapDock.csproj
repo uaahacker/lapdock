@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <!-- Used ONLY for Screen enumeration + battery status. No WinForms UI. -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- WFAC010 suggests WinForms' SetHighDpiMode API instead of the manifest.
+         This is a WPF app: PerMonitorV2 in app.manifest is the correct mechanism. -->
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
+    <AssemblyName>LapDock</AssemblyName>
+    <RootNamespace>LapDock</RootNamespace>
+    <Version>0.1.0</Version>
+    <Authors>Ubaid Ullah</Authors>
+    <Description>LapDock - turn your laptop screen into a living dock when an external monitor is your main display.</Description>
+  </PropertyGroup>
+
+  <!-- UseWindowsForms adds System.Windows.Forms + System.Drawing as GLOBAL usings,
+       which collide with WPF names (Application, UserControl, Button, Point...).
+       Remove them globally; the few files that need WinForms alias it explicitly:
+       using Forms = System.Windows.Forms; -->
+  <ItemGroup>
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+</Project>

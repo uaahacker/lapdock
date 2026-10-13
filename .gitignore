@@ -1,0 +1,23 @@
+## Visual Studio / .NET
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+artifacts/
+TestResults/
+*.nupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+.nuget/
+project.lock.json
+project.fragment.lock.json
+
+## OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
