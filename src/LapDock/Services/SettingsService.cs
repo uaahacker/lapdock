@@ -15,7 +15,12 @@ public static class SettingsService
         try
         {
             if (File.Exists(FilePath))
-                return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new AppSettings();
+            {
+                var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath)) ?? new AppSettings();
+                if (settings.PinnedApps.SequenceEqual(AppSettings.V01Pins))
+                    settings.PinnedApps = new AppSettings().PinnedApps;
+                return settings;
+            }
         }
         catch { /* corrupted settings must never stop the dock from starting */ }
         return new AppSettings();
