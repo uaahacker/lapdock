@@ -18,14 +18,7 @@
             <Canvas Width="260" Height="280">
                 <!-- Antenna -->
                 <Rectangle Canvas.Left="127" Canvas.Top="22" Width="6" Height="24" RadiusX="3" RadiusY="3" Fill="#3A3A3C"/>
-                <Ellipse Canvas.Left="121" Canvas.Top="4" Width="18" Height="18">
-                    <Ellipse.Fill>
-                        <RadialGradientBrush>
-                            <GradientStop Color="#6AB4FF" Offset="0"/>
-                            <GradientStop Color="#0A84FF" Offset="1"/>
-                        </RadialGradientBrush>
-                    </Ellipse.Fill>
-                </Ellipse>
+                <Ellipse Canvas.Left="121" Canvas.Top="4" Width="18" Height="18" Fill="{StaticResource AccentBrush}"/>
 
                 <!-- Head shell -->
                 <Border Canvas.Left="28" Canvas.Top="44" Width="204" Height="196" CornerRadius="64">
@@ -35,14 +28,8 @@
                             <GradientStop Color="#151517" Offset="1"/>
                         </LinearGradientBrush>
                     </Border.Background>
-                    <Border.Effect>
-                        <DropShadowEffect Color="#0A84FF" BlurRadius="40" ShadowDepth="0" Opacity="0.22"/>
-                    </Border.Effect>
                 </Border>
 
-                <!-- Cheeks -->
-                <Ellipse Canvas.Left="52" Canvas.Top="168" Width="26" Height="14" Fill="#FF8FA3" Opacity="0.4"/>
-                <Ellipse Canvas.Left="182" Canvas.Top="168" Width="26" Height="14" Fill="#FF8FA3" Opacity="0.4"/>
 
                 <!-- Brows -->
                 <Border x:Name="BrowL" Canvas.Left="72" Canvas.Top="102" Width="38" Height="8" CornerRadius="4"

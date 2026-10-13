@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetFramework>net8.0-windows10.0.22621.0</TargetFramework>
     <LangVersion>12</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -10,14 +10,22 @@
     <!-- Used ONLY for Screen enumeration + battery status. No WinForms UI. -->
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\LapDock.ico</ApplicationIcon>
     <!-- WFAC010 suggests WinForms' SetHighDpiMode API instead of the manifest.
          This is a WPF app: PerMonitorV2 in app.manifest is the correct mechanism. -->
     <NoWarn>$(NoWarn);WFAC010</NoWarn>
     <AssemblyName>LapDock</AssemblyName>
+    <!-- English UI only: don't ship WPF's ~20 translated resource folders. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <RootNamespace>LapDock</RootNamespace>
-    <Version>0.3.0</Version>
+    <Version>1.0.0</Version>
     <Authors>Ubaid Ullah</Authors>
     <Description>LapDock - turn your laptop screen into a living dock when an external monitor is your main display.</Description>
+  </PropertyGroup>
+
+  <!-- The published single-file LapDock.exe offers to install itself (see InstallService.IsPackaged). -->
+  <PropertyGroup Condition="'$(PublishSingleFile)' == 'true'">
+    <DefineConstants>$(DefineConstants);SINGLE_FILE</DefineConstants>
   </PropertyGroup>
 
   <!-- UseWindowsForms adds System.Windows.Forms + System.Drawing as GLOBAL usings,
@@ -27,6 +35,11 @@
   <ItemGroup>
     <Using Remove="System.Windows.Forms" />
     <Using Remove="System.Drawing" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="QRCoder" Version="1.6.0" />
+    <Resource Include="Assets\LapDock.ico" />
+    <Resource Include="Assets\LapDock-256.png" />
   </ItemGroup>
 
 </Project>

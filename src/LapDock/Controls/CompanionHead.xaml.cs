@@ -22,6 +22,8 @@ public partial class CompanionHead : UserControl
 {
     private readonly DispatcherTimer _blinkTimer = new();
     private readonly DispatcherTimer _danceTimer = new();
+    private readonly DispatcherTimer _reopenTimer = new() { Interval = TimeSpan.FromMilliseconds(110) };
+    private bool _paused;
     private readonly Random _rng = new();
 
     private double _pupilX, _pupilY;       // current (smoothed) pupil offset
@@ -40,6 +42,7 @@ public partial class CompanionHead : UserControl
         InitializeComponent();
 
         _blinkTimer.Tick += (_, _) => Blink();
+        _reopenTimer.Tick += (_, _) => { _reopenTimer.Stop(); ApplyMood(); }; // eyes open again
         ScheduleNextBlink();
         _blinkTimer.Start();
 
@@ -51,7 +54,7 @@ public partial class CompanionHead : UserControl
             HeadLean.Y = -Math.Abs(Math.Sin(_danceTick * 0.9)) * 10; // bounce
             HeadTilt.Angle = Math.Sin(_danceTick * 0.9) * 4;
         };
-        _danceTimer.Start();
+        // (started by SetMood(Dancing) only: nothing ticks while Nova sits still)
 
         MouseLeftButtonUp += (_, _) => Poke();
         Loaded += (_, _) => ApplyMood();
@@ -101,9 +104,27 @@ public partial class CompanionHead : UserControl
 
     // ----------------------------------------------------------------- moods
 
+    /// <summary>
+    /// Nothing moves while Nova can't be seen (notch open, or over a fullscreen app): every repaint of the
+    /// notch's transparent window costs CPU, so a hidden blink or dance is pure waste.
+    /// </summary>
+    public bool Paused
+    {
+        get => _paused;
+        set
+        {
+            if (_paused == value) return;
+            _paused = value;
+            _blinkTimer.IsEnabled = !value;
+            _danceTimer.IsEnabled = !value && BaseMood == NovaMood.Dancing;
+        }
+    }
+
     public void SetMood(NovaMood mood)
     {
         BaseMood = mood;
+        _danceTimer.IsEnabled = mood == NovaMood.Dancing && !_paused;
+        if (mood != NovaMood.Dancing) { HeadLean.Y = 0; HeadTilt.Angle = 0; } // settle after dancing
         ApplyMood();
     }
 
@@ -159,20 +180,20 @@ public partial class CompanionHead : UserControl
 
     private void ScheduleNextBlink()
     {
-        _blinkTimer.Interval = TimeSpan.FromMilliseconds(_rng.Next(2200, 5600));
+        // Now and then, not every few seconds: each blink repaints the notch's transparent window, which was
+        // most of LapDock's idle CPU. An occasional blink still reads as alive.
+        _blinkTimer.Interval = TimeSpan.FromMilliseconds(_rng.Next(20_000, 40_000));
     }
 
+    /// <summary>
+    /// Eyes shut, then open again 110 ms later: two repaints. (A smooth 15-frame blink looked the same at
+    /// notch size and was most of LapDock's idle CPU.)
+    /// </summary>
     private void Blink()
     {
         ScheduleNextBlink();
-        if (Mood == NovaMood.Sleepy) return; // already half closed
-
-        var close = new DoubleAnimation(1, 0.08, new Duration(TimeSpan.FromMilliseconds(70)))
-        {
-            AutoReverse = true,
-            FillBehavior = FillBehavior.Stop // release the property so ApplyMood() can set it directly
-        };
-        EyeLScale.BeginAnimation(ScaleTransform.ScaleYProperty, close);
-        EyeRScale.BeginAnimation(ScaleTransform.ScaleYProperty, close);
+        if (Mood == NovaMood.Sleepy || _paused) return; // already half closed / nobody can see it
+        EyeLScale.ScaleY = EyeRScale.ScaleY = 0.08;
+        _reopenTimer.Start();
     }
 }

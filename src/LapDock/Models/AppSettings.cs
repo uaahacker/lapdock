@@ -15,18 +15,28 @@ public class AppSettings
     public string Notes { get; set; } = string.Empty;
 
     /// <summary>
-    /// Dock pins: "Label|Target" where Target is an exe/lnk path, a shell: URI, or a plain app name for PATH lookup.
-    /// The real app icon is pulled from the shell; Label is the fallback when there is no icon.
-    /// Drag files/shortcuts onto the dock to add, right-click an icon to remove.
+    /// Global hotkey that opens/closes Settings (WPF gesture syntax).
+    /// Not Ctrl+Alt+Space (Claude desktop) or Win+Alt+Space (PowerToys Command Palette).
     /// </summary>
-    public List<string> PinnedApps { get; set; } = new()
-    {
-        "File Explorer|explorer.exe",
-        "Edge|shell:AppsFolder\\MSEdge",
-        "Terminal|shell:AppsFolder\\Microsoft.WindowsTerminal_8wekyb3d8bbwe!App",
-        "Spotify|%APPDATA%\\Spotify\\Spotify.exe",
-        "Settings|ms-settings:",
-    };
+    public string SummonHotkey { get; set; } = DefaultSummonHotkey;
+    public const string DefaultSummonHotkey = "Ctrl+Alt+D";
+    /// <summary>The first default, which collides with Claude desktop's quick entry: upgraded on load.</summary>
+    public const string OldSummonHotkey = "Ctrl+Alt+Space";
+
+    // ── Clipboard history (Clipboard tab) ──
+    public bool ClipboardHistory { get; set; } = true;
+    /// <summary>Opens the notch on the Clipboard tab. Note: apps lose their own Ctrl+Shift+V (paste as plain text) while it's set.</summary>
+    public string ClipboardHotkey { get; set; } = "Ctrl+Shift+V";
+    /// <summary>Unpinned items kept; the oldest go first. Pinned items never count.</summary>
+    public int ClipboardLimit { get; set; } = 500;
+    /// <summary>Copies from these apps (process names) are never recorded. Password managers also mark their copies themselves.</summary>
+    public List<string> ClipboardExcludedApps { get; set; } = new() { "KeePass", "KeePassXC", "1Password", "Bitwarden", "Dashlane", "LastPass" };
+
+    /// <summary>Apps tab file search looks in these folders (names only). Empty = Documents + Desktop.</summary>
+    public List<string> LauncherFolders { get; set; } = new();
+
+    /// <summary>Stats tab "Test speed": any large file URL works; its host is also what "Ping" measures.</summary>
+    public string SpeedTestUrl { get; set; } = "https://speed.cloudflare.com/__down?bytes=25000000";
 
     // ── Notch widgets: each one can be switched off independently. ──
     public bool ShowClock { get; set; } = true;
@@ -37,19 +47,9 @@ public class AppSettings
     /// <summary>Short-lived notch messages: charging, low battery, mic in use, screenshot saved…</summary>
     public bool DynamicNotifications { get; set; } = true;
 
+    /// <summary>Folders added in the Wallpaper tab ("Add folder"), searched three levels deep.</summary>
+    public List<string> WallpaperFolders { get; set; } = new();
+
     /// <summary>Recently applied wallpapers (paths only — files are never copied), newest first.</summary>
     public List<string> RecentWallpapers { get; set; } = new();
-
-    /// <summary>
-    /// v0.1's emoji pins: their Edge/Terminal targets give no real icon on current Windows.
-    /// Pins could not be edited in v0.1, so an exact match is safely upgraded on load.
-    /// </summary>
-    public static readonly string[] V01Pins =
-    {
-        "📁|explorer.exe",
-        "🌐|shell:AppsFolder\\Microsoft.MicrosoftEdge_8wekyb3d8bbwe!MicrosoftEdge",
-        "💻|wt.exe",
-        "🎵|shell:AppsFolder\\SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify",
-        "⚙️|ms-settings:",
-    };
 }

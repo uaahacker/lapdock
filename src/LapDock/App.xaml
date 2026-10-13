@@ -1,17 +1,19 @@
 <Application x:Class="LapDock.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             StartupUri="MainWindow.xaml">
+             ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
 
-        <!-- ══════════ Palette: true black + iOS dark system greys ══════════ -->
+        <!-- ══════════ Palette: black, neutral greys, one calm green. Nothing else. ══════════
+             Surfaces step up in grey: notch (black) → card → control on a card → hover.
+             Orange/red appear only as warnings people already know: low battery, microphone in use. -->
         <Color x:Key="BgColor">#000000</Color>
-        <Color x:Key="CardColor">#0E0E10</Color>
-        <Color x:Key="CardBorderColor">#1E1E21</Color>
+        <Color x:Key="CardColor">#141416</Color>
+        <Color x:Key="CardBorderColor">#2A2A2D</Color>
         <Color x:Key="FillColor">#1C1C1E</Color>
-        <Color x:Key="FillHoverColor">#2C2C2E</Color>
-        <Color x:Key="AccentColor">#0A84FF</Color>
-        <Color x:Key="TextColor">#F5F5F7</Color>
+        <Color x:Key="FillHoverColor">#3A3A3C</Color>
+        <Color x:Key="AccentColor">#34C77B</Color>
+        <Color x:Key="TextColor">#F2F2F4</Color>
         <Color x:Key="MutedColor">#8E8E93</Color>
         <Color x:Key="DimColor">#48484A</Color>
         <SolidColorBrush x:Key="BgBrush" Color="{StaticResource BgColor}"/>
@@ -19,14 +21,21 @@
         <SolidColorBrush x:Key="CardBorderBrush" Color="{StaticResource CardBorderColor}"/>
         <SolidColorBrush x:Key="FillBrush" Color="{StaticResource FillColor}"/>
         <SolidColorBrush x:Key="FillHoverBrush" Color="{StaticResource FillHoverColor}"/>
+        <!-- The one accent: toggles that are on, rings, selection, primary buttons, links -->
         <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}"/>
         <SolidColorBrush x:Key="TextBrush" Color="{StaticResource TextColor}"/>
         <SolidColorBrush x:Key="MutedBrush" Color="{StaticResource MutedColor}"/>
         <SolidColorBrush x:Key="DimBrush" Color="{StaticResource DimColor}"/>
-        <SolidColorBrush x:Key="GreenBrush" Color="#30D158"/>
-        <SolidColorBrush x:Key="PurpleBrush" Color="#BF5AF2"/>
         <SolidColorBrush x:Key="OrangeBrush" Color="#FF9F0A"/>
         <SolidColorBrush x:Key="RedBrush" Color="#FF453A"/>
+
+        <!-- Notch surfaces -->
+        <SolidColorBrush x:Key="PanelBrush" Color="#111113"/>
+        <SolidColorBrush x:Key="PanelTileBrush" Color="#1C1C1E"/>
+        <SolidColorBrush x:Key="PanelFillBrush" Color="#2C2C2E"/>
+        <SolidColorBrush x:Key="PanelInputBrush" Color="#121214"/>
+        <CornerRadius x:Key="TileRadius">16</CornerRadius>
+        <CornerRadius x:Key="PanelRadius">24</CornerRadius>
 
         <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
         <FontFamily x:Key="DisplayFont">Segoe UI Variable Display, Segoe UI</FontFamily>
@@ -78,6 +87,20 @@
             </ControlTemplate.Triggers>
         </ControlTemplate>
 
+        <!-- Rounded rectangle: pills, chips, text buttons (circles keep CapsuleTemplate) -->
+        <ControlTemplate x:Key="SoftTemplate" TargetType="Button">
+            <Grid>
+                <Border Background="{TemplateBinding Background}" CornerRadius="9"/>
+                <Border x:Name="Hover" Background="White" Opacity="0" CornerRadius="9"/>
+                <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Grid>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Hover" Property="Opacity" Value="0.07"/></Trigger>
+                <Trigger Property="IsPressed" Value="True"><Setter TargetName="Hover" Property="Opacity" Value="0.14"/></Trigger>
+                <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.35"/></Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
         <ControlTemplate x:Key="TileTemplate" TargetType="Button">
             <Grid>
                 <Border Background="{TemplateBinding Background}" CornerRadius="14"/>
@@ -90,23 +113,27 @@
             </ControlTemplate.Triggers>
         </ControlTemplate>
 
+        <!-- Secondary button: grey. -->
         <Style x:Key="PillButton" TargetType="Button">
-            <Setter Property="Template" Value="{StaticResource CapsuleTemplate}"/>
-            <Setter Property="Background" Value="{StaticResource FillBrush}"/>
+            <Setter Property="Template" Value="{StaticResource SoftTemplate}"/>
+            <Setter Property="Background" Value="{StaticResource PanelFillBrush}"/>
             <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontSize" Value="12.5"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Padding" Value="18,8"/>
+            <Setter Property="Padding" Value="14,7"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
         </Style>
 
+        <!-- Primary button (Start, Apply, Test speed): the green accent. -->
         <Style x:Key="PrimaryPill" TargetType="Button" BasedOn="{StaticResource PillButton}">
-            <Setter Property="Background" Value="{StaticResource TextBrush}"/>
-            <Setter Property="Foreground" Value="Black"/>
+            <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
+            <Setter Property="Foreground" Value="#0B0B0C"/>
         </Style>
 
+        <!-- Circular icon button. -->
         <Style x:Key="RoundButton" TargetType="Button" BasedOn="{StaticResource PillButton}">
+            <Setter Property="Template" Value="{StaticResource CapsuleTemplate}"/>
             <Setter Property="Width" Value="40"/>
             <Setter Property="Height" Value="40"/>
             <Setter Property="Padding" Value="0"/>
@@ -132,7 +159,7 @@
 
         <Style x:Key="CloseButton" TargetType="Button" BasedOn="{StaticResource ChromeButton}">
             <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{StaticResource RedBrush}"/></Trigger>
+                <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{StaticResource FillHoverBrush}"/></Trigger>
             </Style.Triggers>
         </Style>
 
@@ -145,19 +172,6 @@
             <Setter Property="Margin" Value="3"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-        </Style>
-
-        <!-- Dock icon: no chrome at all, the app icon IS the button -->
-        <Style x:Key="DockIcon" TargetType="Button">
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <ContentPresenter/>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
         </Style>
 
         <!-- ══════════ Inputs ══════════ -->
@@ -174,7 +188,9 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="TextBox">
                         <Border Background="{TemplateBinding Background}" CornerRadius="10">
-                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"
+                            <!-- No Margin="{TemplateBinding Padding}": TextBox already hands its Padding to this
+                                 ScrollViewer, so binding it again applied the padding twice and pushed text off-centre. -->
+                            <ScrollViewer x:Name="PART_ContentHost"
                                           VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Hidden"/>
                         </Border>
                     </ControlTemplate>
@@ -226,7 +242,7 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsHighlighted" Value="True">
-                                <Setter TargetName="B" Property="Background" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="B" Property="Background" Value="{StaticResource FillHoverBrush}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -300,6 +316,140 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+        </Style>
+
+        <!-- Volume: like the seek bar, but the knob is always there to grab -->
+        <Style x:Key="VolumeSlider" TargetType="Slider">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid Height="22" Background="Transparent">
+                            <Track x:Name="PART_Track">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="Slider.DecreaseLarge" Style="{StaticResource SeekPart}" Background="{StaticResource AccentBrush}"/>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="Slider.IncreaseLarge" Style="{StaticResource SeekPart}" Background="{StaticResource FillHoverBrush}"/>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="14" Height="14">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb"><Ellipse Fill="{StaticResource TextBrush}"/></ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Chip (filters, fits, timer presets, display choice): grey text when idle, a soft grey
+             fill when chosen. Same look as the selected tab. Tag="on" = selected. -->
+        <Style x:Key="OptionPill" TargetType="Button" BasedOn="{StaticResource PillButton}">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="Margin" Value="0,0,4,4"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="Normal"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{StaticResource TextBrush}"/></Trigger>
+                <Trigger Property="Tag" Value="on">
+                    <Setter Property="Background" Value="{StaticResource PanelFillBrush}"/>
+                    <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                    <Setter Property="FontWeight" Value="SemiBold"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+
+        <!-- On/off switch: label left, green track right. -->
+        <Style x:Key="Switch" TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Margin" Value="0,0,0,10"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <DockPanel Background="Transparent">
+                            <Border x:Name="Track" DockPanel.Dock="Right" Width="40" Height="22" CornerRadius="11" Background="{StaticResource FillHoverBrush}">
+                                <Ellipse x:Name="Knob" Width="16" Height="16" Margin="3,0" HorizontalAlignment="Left" Fill="{StaticResource TextBrush}"/>
+                            </Border>
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </DockPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Track" Property="Background" Value="{StaticResource AccentBrush}"/>
+                                <Setter TargetName="Knob" Property="HorizontalAlignment" Value="Right"/>
+                                <Setter TargetName="Knob" Property="Fill" Value="Black"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- List rows on cards (Clipboard, Apps): grey fill when selected, faint wash on hover. -->
+        <Style x:Key="ListRow" TargetType="ListBoxItem">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Row" Background="Transparent" CornerRadius="10" Padding="10,7" Margin="0,0,0,2">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Row" Property="Background" Value="#12FFFFFF"/></Trigger>
+                            <Trigger Property="IsSelected" Value="True"><Setter TargetName="Row" Property="Background" Value="{StaticResource PanelFillBrush}"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Slim dark scrollbars everywhere (WPF's default is a light Windows 7 bar). -->
+        <ControlTemplate x:Key="ScrollThumb" TargetType="Thumb">
+            <Border Background="#3DFFFFFF" CornerRadius="3"/>
+        </ControlTemplate>
+        <Style TargetType="ScrollBar">
+            <Setter Property="Width" Value="6"/>
+            <Setter Property="MinWidth" Value="6"/>
+            <Setter Property="Margin" Value="2,0,0,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Track x:Name="PART_Track" IsDirectionReversed="True">
+                            <Track.Thumb><Thumb Template="{StaticResource ScrollThumb}"/></Track.Thumb>
+                        </Track>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="Orientation" Value="Horizontal">
+                    <Setter Property="Width" Value="Auto"/>
+                    <Setter Property="MinWidth" Value="0"/>
+                    <Setter Property="Height" Value="6"/>
+                    <Setter Property="MinHeight" Value="6"/>
+                    <Setter Property="Margin" Value="0,2,0,0"/>
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="ScrollBar">
+                                <Track x:Name="PART_Track">
+                                    <Track.Thumb><Thumb Template="{StaticResource ScrollThumb}"/></Track.Thumb>
+                                </Track>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Trigger>
+            </Style.Triggers>
         </Style>
 
     </Application.Resources>
