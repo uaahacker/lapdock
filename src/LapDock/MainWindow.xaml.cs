@@ -1,317 +1,183 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Media;
+using System.Windows.Interop;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
-using LapDock.Controls;
 using LapDock.Models;
 using LapDock.Services;
-using LapDock.ViewModels;
+using Microsoft.Win32;
 using Forms = System.Windows.Forms;
 
 namespace LapDock;
 
+/// <summary>
+/// LapDock is a notch: a black pill flush with the top edge of a display.
+/// <list type="bullet">
+/// <item>Peek — collapsed: clock or now playing, privacy dots, battery.</item>
+/// <item>Activity — a few seconds of "Charging", "Microphone in use", "Screenshot saved"…</item>
+/// <item>Expanded — on hover: status, pinned apps, media, tools and their panels.</item>
+/// </list>
+/// This file is the shell (states, hover, placement); MainWindow.Dock.cs holds the pinned apps,
+/// MainWindow.Widgets.cs the system widgets.
+/// </summary>
 public partial class MainWindow : Window
 {
-    [DllImport("user32.dll")]
-    private static extern void LockWorkStation();
+    private enum Mode { Peek, Activity, Expanded }
 
-    private readonly MainViewModel _vm = new();
-    private readonly CursorService _cursor = new();
-    private readonly SystemStatsService _stats = new();
+    private const double PeekMinWidth = 190, PeekHeight = 32;
+    private const double ExpandedMinWidth = 440;
+
     private readonly AppSettings _settings;
-    private readonly List<Button> _dockButtons = new();
-    private readonly Random _rng = new();
+    private readonly DispatcherTimer _collapseTimer = new() { Interval = TimeSpan.FromMilliseconds(400) };
 
-    private List<Forms.Screen> _screens = new();
-    private bool _initialising = true;
-    private bool _musicPlaying;
-    private bool _fullscreen;
-    private int _tick;
-
-    private static readonly string[] IdleBubbles =
-    {
-        "👀 I'm watching your cursor…",
-        "👋 Hi! I'm Nova. I live on this screen.",
-        "🎯 Start a Pomodoro and I'll guard your focus.",
-        "🎵 Put some music on — I dance, honestly.",
-        "💡 Tip: click a screen above to move me to your laptop panel.",
-        "✨ Clean desk, clean mind. Your main screen is for work — I'm the vibe."
-    };
+    private Mode _mode = Mode.Peek;
+    private double _expandedWidth = ExpandedMinWidth;
+    private (double W, double H) _pillTarget = (PeekMinWidth, PeekHeight);
+    private int _modal;       // > 0 while a file picker or similar dialog is open
+    private bool _dragInside;
 
     public MainWindow()
     {
         InitializeComponent();
-        DataContext = _vm;
         _settings = SettingsService.Load();
-
-        BuildScreenPicker();
         BuildDock();
 
-        NotesBox.Text = _settings.Notes;
-        _initialising = false;
-
-        _cursor.CursorMoved += pos => Nova.LookAt(pos, _cursor.IdleSeconds);
-        _cursor.Start();
-
-        var statsTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        statsTimer.Tick += (_, _) => { UpdateStats(); UpdateMoodLine(); };
-        statsTimer.Start();
-        UpdateStats();
-
-        var eqTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(110) };
-        eqTimer.Tick += (_, _) => AnimateEqualizer();
-        eqTimer.Start();
-
-        _vm.PomodoroPhaseChanged += isFocus =>
+        // Grace period before closing, so crossing a tiny gap doesn't snap it shut. While a menu,
+        // slider drag or dialog is active, keep re-checking instead of closing under the user.
+        _collapseTimer.Tick += (_, _) =>
         {
-            BubbleText.Text = isFocus ? "🎯 Back to focus — you got this." : "☕ Break time. Stretch!";
-            System.Media.SystemSounds.Asterisk.Play();
+            if (!CanCollapse()) return;
+            _collapseTimer.Stop();
+            if (!Island.IsMouseOver) SetMode(Mode.Peek);
         };
 
-        Loaded += async (_, _) =>
+        SourceInitialized += (_, _) =>
         {
-            // Restore LapDock onto its saved display (usually the laptop panel).
-            var target = ScreenService.FindByDeviceName(_settings.ScreenDeviceName);
-            if (target is not null)
-            {
-                SelectScreenInPicker(target);
-                ScreenService.MoveToScreen(this, target);
-            }
-            await LoadWeatherAsync();
+            HideFromAltTab();
+            PlaceOnScreen(); // before first show, so it never flashes elsewhere
         };
+        Loaded += async (_, _) => await StartWidgetsAsync();
+        SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
 
         Closed += (_, _) =>
         {
-            _cursor.Dispose();
+            SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged; // static event: must unhook
+            _collapseTimer.Stop();
+            StopWidgets();
             SettingsService.Save(_settings);
         };
     }
 
-    // ------------------------------------------------------------ screen pick
-    private void BuildScreenPicker()
+    // ------------------------------------------------------------- states
+    private void Island_MouseEnter(object sender, MouseEventArgs e)
     {
-        _screens = ScreenService.AllScreens.ToList();
-        ScreenPicker.Items.Clear();
-        for (int i = 0; i < _screens.Count; i++)
-            ScreenPicker.Items.Add(ScreenService.FriendlyName(_screens[i], i));
-        ScreenPicker.SelectedIndex = Math.Max(0, _screens.FindIndex(s => s.Primary));
+        _collapseTimer.Stop();
+        SetMode(Mode.Expanded);
     }
 
-    private void SelectScreenInPicker(Forms.Screen screen)
+    private void Island_MouseLeave(object sender, MouseEventArgs e) => RestartCollapse();
+
+    private void RestartCollapse()
     {
-        int idx = _screens.IndexOf(screen);
-        if (idx >= 0) ScreenPicker.SelectedIndex = idx;
+        _collapseTimer.Stop();
+        _collapseTimer.Start();
     }
 
-    private void ScreenPicker_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private bool CanCollapse() =>
+        !AnyMenuOpen() && !_dragInside && _modal == 0 && Mouse.Captured is null;
+
+    private void SetMode(Mode mode)
     {
-        if (_initialising || ScreenPicker.SelectedIndex < 0) return;
-        var screen = _screens[ScreenPicker.SelectedIndex];
-        _settings.ScreenDeviceName = screen.DeviceName;
-        SettingsService.Save(_settings);
-        ScreenService.MoveToScreen(this, screen);
-        BubbleText.Text = $"🖥️ Moved to {ScreenService.FriendlyName(screen, ScreenPicker.SelectedIndex)}";
+        if (mode != Mode.Expanded && _panel is not null) ShowPanel(null); // closing always closes the open panel
+        if (mode == _mode) return;
+        _mode = mode;
+        if (mode != Mode.Expanded) Magnify(null);
+        Fade(Peek, mode == Mode.Peek ? 1 : 0, mode == Mode.Peek ? 160 : 80, delayMs: mode == Mode.Peek ? 120 : 0);
+        Fade(Activity, mode == Mode.Activity ? 1 : 0, mode == Mode.Activity ? 180 : 90, delayMs: mode == Mode.Activity ? 110 : 0);
+        Fade(Expanded, mode == Mode.Expanded ? 1 : 0, mode == Mode.Expanded ? 200 : 90, delayMs: mode == Mode.Expanded ? 110 : 0);
+        Expanded.IsHitTestVisible = mode == Mode.Expanded;
+        ResizePill();
     }
 
-    // ------------------------------------------------------------------ dock
-    private void BuildDock()
+    /// <summary>Animates the pill to fit whatever the current state shows (it changes as panels open, music starts…).</summary>
+    private void ResizePill()
     {
-        foreach (var pin in _settings.PinnedApps)
+        // Run the pending layout pass first: measuring an element directly returns a stale size when
+        // only its descendants changed (a panel opened, a text got longer) — the pill came out too short.
+        UpdateLayout();
+        var (w, h) = _mode switch
         {
-            var parts = pin.Split('|', 2);
-            if (parts.Length != 2) continue;
-            var btn = new Button
-            {
-                Content = parts[0],
-                Style = (Style)FindResource("DockButton"),
-                ToolTip = parts[1]
-            };
-            var target = parts[1];
-            btn.Click += (_, _) => Launch(target);
-            btn.MouseEnter += (_, _) => Magnify(btn);
-            btn.MouseLeave += (_, _) => Magnify(null);
-            _dockButtons.Add(btn);
-            DockPanel.Children.Add(btn);
-        }
-    }
-
-    /// <summary>macOS-style magnification: hovered icon grows, neighbours grow a little.</summary>
-    private void Magnify(Button? hovered)
-    {
-        for (int i = 0; i < _dockButtons.Count; i++)
-        {
-            double scale = 1.0;
-            if (hovered is not null)
-            {
-                int d = Math.Abs(i - _dockButtons.IndexOf(hovered));
-                scale = d == 0 ? 1.28 : d == 1 ? 1.13 : 1.0;
-            }
-            _dockButtons[i].RenderTransform = new ScaleTransform(scale, scale);
-        }
-    }
-
-    private void Launch(string target)
-    {
-        try
-        {
-            Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
-        }
-        catch
-        {
-            BubbleText.Text = $"⚠️ Couldn't open {target} — is it installed?";
-        }
-    }
-
-    // ----------------------------------------------------------------- music
-    private void PlayPause_Click(object sender, RoutedEventArgs e)
-    {
-        MediaService.PlayPause();
-        _musicPlaying = !_musicPlaying;
-        PlayButton.Content = _musicPlaying ? "⏸" : "▶";
-        MediaStatus.Text = _musicPlaying ? "  Now playing on this PC…" : "  Paused";
-        Nova.SetMood(_musicPlaying ? NovaMood.Dancing : NovaMood.Awake);
-        BubbleText.Text = _musicPlaying ? "🎵 Grooving… nice taste." : "👀 Back to watching your cursor…";
-    }
-
-    private void Prev_Click(object sender, RoutedEventArgs e) => MediaService.Previous();
-    private void Next_Click(object sender, RoutedEventArgs e) => MediaService.Next();
-    private void VolUp_Click(object sender, RoutedEventArgs e) => MediaService.VolumeUp();
-    private void VolDown_Click(object sender, RoutedEventArgs e) => MediaService.VolumeDown();
-    private void Mute_Click(object sender, RoutedEventArgs e) => MediaService.Mute();
-
-    private void AnimateEqualizer()
-    {
-        var bars = new[] { Eq1, Eq2, Eq3, Eq4, Eq5 };
-        foreach (var bar in bars)
-            bar.Height = _musicPlaying ? _rng.Next(6, 30) : 6;
-    }
-
-    // ---------------------------------------------------------------- timers
-    private void PomoStartPause_Click(object sender, RoutedEventArgs e)
-    {
-        _vm.PomoStartPause();
-        if (_vm.PomoIsRunning)
-        {
-            if (!_musicPlaying) Nova.SetMood(NovaMood.Focused);
-            BubbleText.Text = "🎯 Focus mode — Nova is guarding your time.";
-        }
-        else if (!_musicPlaying) Nova.SetMood(NovaMood.Awake);
-    }
-
-    private void PomoReset_Click(object sender, RoutedEventArgs e) => _vm.PomoReset();
-    private void CountStartPause_Click(object sender, RoutedEventArgs e) => _vm.CountStartPause();
-    private void CountReset_Click(object sender, RoutedEventArgs e) => _vm.CountReset();
-    private void WatchStartPause_Click(object sender, RoutedEventArgs e) => _vm.WatchStartPause();
-    private void WatchReset_Click(object sender, RoutedEventArgs e) => _vm.WatchReset();
-
-    // ----------------------------------------------------------------- stats
-    private void UpdateStats()
-    {
-        var s = _stats.GetStats();
-        CpuBar.Value = s.CpuPercent;
-        CpuText.Text = $"CPU — {s.CpuPercent:0}%";
-        RamBar.Value = s.RamPercent;
-        RamText.Text = $"RAM — {s.RamUsedGb:0.0} / {s.RamTotalGb:0.0} GB ({s.RamPercent:0}%)";
-        if (s.BatteryPercent is int batt)
-        {
-            BattBar.Value = batt;
-            BattText.Text = $"Battery — {batt}%{(s.BatteryCharging ? " ⚡ charging" : "")}";
-        }
-        else
-        {
-            BattBar.Value = 0;
-            BattText.Text = "Battery — plugged in / none";
-        }
-    }
-
-    private async Task LoadWeatherAsync()
-    {
-        var w = await WeatherService.GetCurrentAsync(_settings.Latitude, _settings.Longitude);
-        if (w is { } info)
-        {
-            WeatherText.Text = $"{info.Summary}  {info.TempC:0}°C";
-            WeatherCity.Text = _settings.CityName;
-        }
-        else
-        {
-            WeatherText.Text = "🌡️ offline";
-        }
-    }
-
-    // ------------------------------------------------------------ mood line
-    private void UpdateMoodLine()
-    {
-        _tick++;
-        MoodText.Text = Nova.Mood switch
-        {
-            NovaMood.Sleepy => "Nova is sleepy — cursor has been still a while",
-            NovaMood.Dancing => "Nova is dancing to your music",
-            NovaMood.Happy => "Nova noticed you!",
-            NovaMood.Focused => "Nova is in focus mode with you",
-            _ => "Nova is awake, watching your cursor"
+            Mode.Expanded => (_expandedWidth, Expanded.DesiredSize.Height),
+            Mode.Activity => (Math.Max(PeekMinWidth, Activity.DesiredSize.Width), Activity.Height),
+            _ => (Math.Max(PeekMinWidth, Peek.DesiredSize.Width), PeekHeight),
         };
-
-        // Rotate idle bubbles every ~9 s, unless something more important is showing.
-        if (_tick % 9 == 0 && Nova.Mood == NovaMood.Awake && !_vm.PomoIsRunning && !_musicPlaying)
-            BubbleText.Text = IdleBubbles[_rng.Next(IdleBubbles.Length)];
+        // Widgets refresh often (battery, clock, media); only animate when the size really changes —
+        // every animation repaints the whole layered window.
+        if (Math.Abs(w - _pillTarget.W) < 0.5 && Math.Abs(h - _pillTarget.H) < 0.5) return;
+        _pillTarget = (w, h);
+        bool growing = h > Pill.ActualHeight || w > Pill.ActualWidth;
+        // Grow with a little spring (iOS), shrink quick and clean.
+        IEasingFunction ease = growing
+            ? new BackEase { EasingMode = EasingMode.EaseOut, Amplitude = 0.25 }
+            : new CubicEase { EasingMode = EasingMode.EaseOut };
+        var duration = TimeSpan.FromMilliseconds(growing ? 340 : 230);
+        Pill.BeginAnimation(WidthProperty, new DoubleAnimation(w, duration) { EasingFunction = ease });
+        Pill.BeginAnimation(HeightProperty, new DoubleAnimation(h, duration) { EasingFunction = ease });
     }
 
-    // ---------------------------------------------------------- quick actions
-    private void Lock_Click(object sender, RoutedEventArgs e) => LockWorkStation();
-    private void Snip_Click(object sender, RoutedEventArgs e) => Launch("ms-screenclip:");
-    private void TaskMgr_Click(object sender, RoutedEventArgs e) => Launch("taskmgr.exe");
-    private void Focus_Click(object sender, RoutedEventArgs e) => Launch("ms-settings:quietmomentshome");
-    private void DisplaySettings_Click(object sender, RoutedEventArgs e) => Launch("ms-settings:display");
-    private void SoundSettings_Click(object sender, RoutedEventArgs e) => Launch("ms-settings:sound");
+    private static void Fade(UIElement element, double to, int ms, int delayMs) =>
+        element.BeginAnimation(OpacityProperty, new DoubleAnimation(to, TimeSpan.FromMilliseconds(ms))
+        {
+            BeginTime = TimeSpan.FromMilliseconds(delayMs)
+        });
 
-    // ----------------------------------------------------------------- notes
-    private void NotesBox_TextChanged(object sender, TextChangedEventArgs e)
+    private bool AnyMenuOpen() =>
+        Island.ContextMenu.IsOpen || _dockButtons.Any(b => b.ContextMenu?.IsOpen == true);
+
+    /// <summary>Runs a modal dialog without the notch collapsing underneath it.</summary>
+    private T Modal<T>(Func<T> dialog)
     {
-        if (_initialising) return;
-        _settings.Notes = NotesBox.Text;
+        _modal++;
+        try { return dialog(); }
+        finally
+        {
+            _modal--;
+            RestartCollapse();
+        }
+    }
+
+    // --------------------------------------------------------------- screens
+    private void PlaceOnScreen()
+    {
+        var screen = ScreenService.FindByDeviceName(_settings.ScreenDeviceName);
+        if (screen is not null) ScreenService.PlaceTopCenter(this, screen);
+    }
+
+    private void NextDisplay_Click(object sender, RoutedEventArgs e)
+    {
+        var screens = Forms.Screen.AllScreens;
+        var current = ScreenService.ScreenOf(this).DeviceName;
+        int next = (Array.FindIndex(screens, s => s.DeviceName == current) + 1) % screens.Length;
+        _settings.ScreenDeviceName = screens[next].DeviceName;
         SettingsService.Save(_settings);
+        PlaceOnScreen();
     }
 
-    // ----------------------------------------------------------- window chrome
-    private void TopBar_MouseDown(object sender, MouseButtonEventArgs e)
+    /// <summary>Monitor plugged/unplugged, resolution or scaling changed: back to the top of the preferred display.</summary>
+    private void OnDisplaySettingsChanged(object? sender, EventArgs e) => Dispatcher.InvokeAsync(PlaceOnScreen);
+
+    private void Quit_Click(object sender, RoutedEventArgs e) => Close();
+
+    // ---------------------------------------------------------------- interop
+    [DllImport("user32.dll")] private static extern int GetWindowLong(IntPtr hWnd, int index);
+    [DllImport("user32.dll")] private static extern int SetWindowLong(IntPtr hWnd, int index, int value);
+
+    /// <summary>A notch is not an app window: keep it out of Alt+Tab (ShowInTaskbar only covers the taskbar).</summary>
+    private void HideFromAltTab()
     {
-        if (e.ChangedButton == MouseButton.Left && WindowState != WindowState.Maximized)
-            DragMove();
-    }
-
-    private void Pin_Click(object sender, RoutedEventArgs e)
-    {
-        Topmost = !Topmost;
-        BubbleText.Text = Topmost ? "📌 Pinned — I'll stay on top." : "📌 Unpinned.";
-    }
-
-    private void Minimise_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
-    private void Close_Click(object sender, RoutedEventArgs e) => Close();
-
-    private void Fullscreen_Click(object sender, RoutedEventArgs e) => ToggleFullscreen();
-
-    private void ToggleFullscreen()
-    {
-        _fullscreen = !_fullscreen;
-        if (_fullscreen)
-        {
-            WindowState = WindowState.Maximized;
-        }
-        else
-        {
-            WindowState = WindowState.Normal;
-            Width = 1340; Height = 820;
-            Left = (Forms.Screen.PrimaryScreen!.WorkingArea.Width - Width) / 2;
-            Top = (Forms.Screen.PrimaryScreen!.WorkingArea.Height - Height) / 2;
-        }
-    }
-
-    private void OnKeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.F11) ToggleFullscreen();
-        else if (e.Key == Key.Escape && _fullscreen) ToggleFullscreen();
+        const int GWL_EXSTYLE = -20, WS_EX_TOOLWINDOW = 0x80;
+        var hwnd = new WindowInteropHelper(this).Handle;
+        SetWindowLong(hwnd, GWL_EXSTYLE, GetWindowLong(hwnd, GWL_EXSTYLE) | WS_EX_TOOLWINDOW);
     }
 }
