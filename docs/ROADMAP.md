@@ -1,108 +1,61 @@
-# LapDock — Progress & Suggestions
+# LapDock — Progress
 
-## Done so far
+## v1.0 — the notch, tab for tab ✅ (13 Oct 2026)
 
-### v0.1 ✅
+Built in phases from [HITODAMA-ROADMAP.md](HITODAMA-ROADMAP.md):
 
-- Fullscreen borderless dock window, pick which display it lives on
-- Nova companion: cursor-tracking eyes, blink, head tilt, sleepy/happy/dancing moods
-- Music: media keys + volume, animated equalizer while playing
-- Pomodoro + countdown + stopwatch + big clock
-- CPU / RAM / battery live stats
-- Weather via Open-Meteo (no API key)
-- App dock with hover magnification, quick actions, scratch notes
-- Settings persisted to %AppData%/LapDock/settings.json
+- **Shell**: the notch opens on hover into seven tabs; Ctrl+Alt+D, the tray icon or a
+  second launch open **Settings**. Bezel-style shape (curved shoulders), drop-from-the-top
+  animation, content clipped to the shape.
+- **Controls**: Wi-Fi, Bluetooth, audio, microphone, dark mode, airplane (real toggles),
+  night light and Do not disturb (open Settings — no public API), volume, music player (SMTC).
+- **Today**: time, week range, weather (city set in Settings), week strip with events
+  (ICS import), ring timer, to-dos with `@time` reminders.
+- **Stats**: CPU / memory / GPU rings, top apps by memory (Task Manager's measure), live
+  network, ping, download speed test.
+- **Clipboard**: history of text and images, search, filters, pin, QR, snippets,
+  Enter pastes into the previous app, Ctrl+Shift+V.
+- **Apps**: launcher over every Start app, files (Documents/Desktop), snippets, favourites.
+- **Wallpaper**: picture grid with instant apply, fit options, add folders.
+- **Power**: lock, sleep (Modern Standby aware), restart / shut down with hold-to-confirm.
+- **Fullscreen apps**: the notch turns into a plain black pill and stays quiet.
+- **Look**: black, greys and one green; LapDock's own icon set and app icon.
+- **Distribution**: one self-contained `LapDock.exe` that installs itself per user
+  (Start menu, Settings → Apps uninstall, start at sign-in), single instance.
+- Removed: the pinned-app dock row (Apps tab + favourites replace it).
 
-### v0.2 — Real music + redesign ✅
+### How v1.0 was checked
 
-- **LapDock becomes a notch**: a black pill at the top-centre of the display
-  that opens into the dock on hover (dashboard widgets parked for now)
-- SMTC integration: song title, artist, album art, real play/pause state, seek bar
-- Black minimalist redesign (iOS dark palette, Fluent icons, no emoji)
-- iPhone-style dock: real shell icons, magnification, launch bounce,
-  drag-to-pin, right-click to remove
-- First run opens on the non-main display (the laptop panel); re-placed
-  automatically when a monitor is plugged/unplugged
-- Fixes: timers no longer drift, countdown follows its input, hours display,
-  notes save debounced, weather refresh + invariant-culture URL
-
-### v0.3 — System utility ✅
-
-- Battery: %, charging, plugged in, low (≤20%), critical (≤10%), full; hidden without a battery
-- Microphone / camera in-use indicators with the app's name; privacy panel
-- Now Playing in the notch (collapsed title + pulse, expanded controls + seek)
-- Volume slider + mute; changes made elsewhere (keyboard keys) shown as a live message
-- Screenshot: rectangle, window, full screen, open Snipping Tool; "Screenshot saved"
-- Wallpaper: preview, change (file picker), next, recent, fit style
-- Live notch messages for system events, de-duplicated
-- Hover: stays open while a menu, slider drag, file picker or drag-and-drop is active
-- Drag-and-drop: drop slot + highlight, only apps/shortcuts, real names, no duplicates
-- Every widget can be switched off in settings.json; a failing widget never takes the notch down
-
-### How v0.3 was checked (on a real Windows 11 laptop + external monitor, 125% scaling)
-
-Tested on the running app:
-- Transparent area around the notch is click-through (clicks reach the app below)
-- Battery reading and panel; volume message from the keyboard volume keys
-- Rectangle snip opens Snipping Tool's overlay in rectangle mode
-- Full screen hides the notch, Windows saves the screenshot, "Screenshot saved" appears
-- All panels; media card and collapsed media title with Spotify and Netflix
-- Wallpaper change / next / recent through real use
-- Idle CPU ≈ 0% (event-driven, nothing polls), ~68 MB private memory
-
-Still to be confirmed by hand:
-- Mic / camera indicators (start a call, or open the Camera app)
-- Battery messages on plug / unplug
-- Dragging a shortcut onto the notch
+- Release build 0 errors / 0 warnings; 7 self-checks (reminder parsing, ICS reader, top-apps
+  ordering, speed maths, clipboard classification, launcher matching, fullscreen rule).
+- Every tab, Settings and the setup windows rendered and reviewed.
+- Live on a Windows 11 laptop: fullscreen detection on/off; clipboard capture (text, image,
+  password-manager copy skipped); hold-to-confirm (short press does nothing).
+- End-to-end with the published exe, 23/23: install window, silent install, Start menu,
+  Settings → Apps entry, sign-in entry, both shortcuts held, single instance, idle CPU,
+  uninstall removes everything and keeps user data, no errors logged.
 
 ### Known limits
 
-- Snipping Tool's modern capture protocol only works for packaged (MSIX) apps, so
-  rectangle/window use the older `ms-screenclip:` URI (deprecated by Microsoft, still
-  working). Full screen uses Win+PrintScreen and captures every display.
-- Low/critical battery levels are fixed at 20% / 10% rather than read from the power plan.
-- The notch is always on top, so it shows over fullscreen games and video.
-- Widget switches are only in settings.json for now (no settings panel yet).
-- "Move to next display" cycles through displays rather than listing them.
+- The exe isn't code-signed: SmartScreen asks to confirm on first run.
+- Night light and Do not disturb can't be toggled (no public Windows API).
+- Sleep on Modern Standby laptops turns the display off, the way the power button does.
+- Clipboard history skips files copied in Explorer and text over 1 million characters.
+- Repeating calendar events import once; ICS time zones are read as local time.
+- File search covers names only, in the chosen folders (default Documents + Desktop).
+- One wallpaper for all displays.
 
-## Suggestions
+## Earlier
 
-Ideas for where LapDock could go next — not commitments, pick what is useful.
+- **v0.3** — the notch as a system utility: battery, mic/camera indicators, now playing,
+  volume, screenshots, wallpaper, live messages.
+- **v0.2** — the dock became a notch; SMTC music; real app icons.
+- **v0.1** — fullscreen dock window with Nova, timers, stats, weather, notes.
 
-### System widgets
+## Next
 
-- Brightness, shown only on displays that support software control
-- Network: Wi-Fi name, signal, connected / no internet; open network settings
-- Bluetooth: on/off state and connected devices; open Bluetooth settings
-- Audio output picker (or Windows' own output selector where switching isn't reliable)
-- Power actions: lock, sleep; restart / shut down only after a confirmation step
-- Shortcuts: Settings, Display, Sound, Bluetooth, Network, Personalization,
-  Task Manager, File Explorer, Terminal
-- Clipboard history button (opens Windows' own history, stores nothing)
-- Do Not Disturb / notifications state, if Windows exposes it reliably
-
-### Dock & apps
-
-- Better right-click menu: open file location, run as administrator — only where valid
-- Running indicator under pinned apps; list an app's windows to switch between them
-- Optional recent apps next to the pinned ones
-- *Move to display* submenu listing every display
-
-### Customization
-
-- Settings panel: General, Appearance, Dock, Widgets, Media, Privacy, Displays, Behavior
-- Start with Windows
-- Fullscreen behaviour: always show / auto-hide / hide during games and video
-- Position (left / centre / right), size (small / medium / large)
-- Background (solid / acrylic / opacity), light / dark / follow Windows, accent colour
-
-### Nova & extra widgets
-
-- Bring back Nova, timers, weather and notes as optional notch sections
-- More Nova moods (focused during Pomodoro, celebrating on timer finish)
-- Calendar/agenda (local ICS), GitHub notifications, network speed
-
-### Distribution
-
-- MSIX packaging (would also unlock Snipping Tool's modern capture protocol)
-- Microsoft Store listing
+- **Voice** (roadmap Phase 9, waiting for the go-ahead): hold Ctrl+Win to dictate with
+  AI clean-up, voice commands, routines. Needs a Gemini API key.
+- Code signing; a `winget` / Microsoft Store listing.
+- A keyboard shortcut for the Apps launcher; launcher ranking by use.
+- Per-display wallpapers; Settings for clipboard exclusions and index folders.

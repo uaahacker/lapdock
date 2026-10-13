@@ -12,6 +12,24 @@ before the next phase starts. (The Astra run of Oct 2026 stalled because its
 environment never ran the build — do not repeat that: build first, then code
 the next phase.)
 
+## Status — v1.0 (13 Oct 2026)
+
+| Phase | State |
+|---|---|
+| 0 Shell + theme | ✅ — tabs live inside the notch (see design change in §4); Ctrl+Alt+D opens Settings |
+| 1 Controls | ✅ — plus a Microphone tile; night light / DND open Settings |
+| 2 Music (SMTC) | ✅ — shared `MusicCard` |
+| 3 Today | ✅ — weather city settable in Settings |
+| 4 Stats | ✅ |
+| 5 Clipboard | ✅ — Enter pastes into the previous app; snippets |
+| 6 Apps | ✅ — Windows Apps folder instead of .lnk parsing (includes Store apps) |
+| 7 Wallpaper | ✅ |
+| 8 Power | ✅ — Modern Standby aware sleep |
+| 9 Voice + AI | ⏸ parked until Ubaid's go-ahead |
+| 10 Polish & packaging | ✅ shape/animation, fullscreen quiet mode, grey+green palette, own icon set, start with Windows, single instance, self-installing `LapDock.exe`, self-checks, end-to-end test (23/23). Not done: xUnit project (self-checks instead), code signing |
+
+Progress details and known limits: [ROADMAP.md](ROADMAP.md). Architecture: [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ---
 
 ## 1. Evidence base (what we actually know, and from where)
@@ -129,6 +147,13 @@ Ghidra via `rea decompile`) and append findings to §6 before Phase 1.
 
 ## 4. Phases
 
+> **Design change (Ubaid, 13 Oct 2026):** the tabs live **inside the notch** — hover the
+> pill and it opens into status chips, pinned apps and the tab bar (Controls, Today, Stats,
+> Clipboard, Apps, Wallpaper, Power), all in `MainWindow.xaml` with pages under
+> `Views/Tabs/`. There is no separate floating feature panel: the hotkey (`Ctrl+Alt+D`),
+> tray icon and the notch's right-click menu open **Settings** (`Views/SettingsWindow`).
+> Later phases build their tab as a page in the notch, sized for its ~536 px content width.
+
 ### Phase 0 — Island shell + theme system
 **Goal:** LapDock opens as a small island pill at the top-centre of the
 chosen screen; clicking it (or pressing the summon hotkey, or scrolling down
@@ -151,7 +176,7 @@ Build:
   These are sampled from the reel's look — our own palette, same family.
 - Nova (existing `CompanionHead`) sits in the island; mood logic unchanged.
 - Global hotkey service `Services/HotkeyService.cs` (RegisterHotKey):
-  default summon = `Ctrl+Alt+Space`, configurable; also mouse-wheel-on-
+  default summon = `Ctrl+Alt+D` (was `Ctrl+Alt+Space` — taken by Claude desktop's quick entry), configurable; also mouse-wheel-on-
   island expand, `Esc` collapse. Tray icon with Show/Quit (uses existing
   settings for the target screen; reuse `ScreenService.MoveToScreen`).
 

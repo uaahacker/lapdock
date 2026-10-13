@@ -1,113 +1,92 @@
-# LapDock — Architecture
+# LapDock — Architecture (v1.0)
 
 ## Idea
 
-Two screens, two jobs:
-
-- **External monitor = work.** IDE, browser, documents.
-- **Laptop screen = LapDock.** Ambient, glanceable, alive: companion, music,
-  timers, stats, quick actions. Nothing there needs your keyboard focus.
+When an external monitor is the main workspace, the laptop screen sits mostly unused.
+LapDock puts a notch at the top of it: a black pill that shows what matters at a glance
+and drops open on hover into seven tabs. It never takes focus unless you type into it,
+and it stays out of the way of fullscreen apps.
 
 ## Stack
 
-- C# 12, WPF, .NET 8 (`net8.0-windows`), x64/AnyCPU.
-- No third-party NuGet packages in v0.1 — `dotnet run` works on a clean machine.
-- Win32 P/Invoke where WPF has no API: global cursor (`GetCursorPos`),
-  media/volume keys (`keybd_event`), memory (`GlobalMemoryStatusEx`),
-  CPU (`GetSystemTimes` deltas — no PerformanceCounter dependency),
-  exact screen placement (`SetWindowPos` in physical pixels, so 125%/150%
-  scaled laptop panels line up correctly).
-- `System.Windows.Forms` is referenced only for `Screen` (display enumeration)
-  and `SystemInformation.PowerStatus` (battery). No WinForms UI is shown.
+- C# 12, WPF, .NET 8, `net8.0-windows10.0.22621.0` (WinRT for SMTC, radios, network, power).
+- One NuGet package: **QRCoder** (clipboard QR codes). Everything else is Windows itself:
+  Win32 / COM / WinRT through P/Invoke.
+- WinForms is referenced only for `Screen` and the tray `NotifyIcon`
+  (aliased `using Forms = System.Windows.Forms;`; its global usings are removed in the csproj).
+- PerMonitorV2 (`app.manifest`); windows are placed with `SetWindowPos` in physical pixels.
 
-## How Nova watches your cursor
+## Startup (`App.xaml.cs`)
 
-`CursorService` polls `GetCursorPos` on a 16 ms `DispatcherTimer` — cheap, and
-it sees the cursor **on every monitor**, not just inside the LapDock window
-(WPF mouse events would go blind the moment you work on the main screen, which
-is exactly when Nova should be watching).
+| Command line | What happens |
+|---|---|
+| `--uninstall [--quiet] [--remove-data]` | uninstall window (or silent uninstall) |
+| `--install --quiet [--autostart] [--desktop] [--no-launch]` | silent install |
+| published exe, not in its install folder | install window (Install / Try without installing) |
+| otherwise | the notch, once per session (`SingleInstance`: a second launch opens Settings) |
 
-Each tick it raises `CursorMoved(screenPoint)`. `CompanionHead` converts that
-to a direction relative to its own on-screen centre, then:
+`InstallService` installs per user: exe in `%LocalAppData%\Programs\LapDock`, Start menu
+shortcut (IShellLink), an uninstall entry under HKCU (Settings → Apps), HKCU Run for
+start-at-sign-in. Uninstall closes the running copy, removes all of that, and a hidden
+`cmd` deletes the folder after the exe exits. The installer path only exists in the
+published single-file build (`SINGLE_FILE` is defined when `PublishSingleFile=true`).
 
-- moves both pupils toward the cursor (clamped to the eye),
-- rotates the whole head a few degrees toward it and leans (translate) slightly,
-- resets an idle timer — after 12 s without movement Nova gets sleepy
-  (half-closed eyes, "Zzz"), any movement wakes it up.
+Unhandled UI errors are logged to `%AppData%\LapDock\error.log` and the notch keeps running.
 
-Blinking is an independent random timer (2.2–5.5 s) that scales the eyes
-closed for ~120 ms. Clicking Nova triggers a happy bounce (mood system:
-`Awake / Sleepy / Happy / Dancing`). `Dancing` is switched on by the music
-card while playback is active.
+## The notch (`MainWindow`)
 
-## Music
+A fixed-width, fully transparent, topmost tool window (no taskbar / Alt+Tab entry);
+transparent pixels are click-through, so only the black shape takes the mouse.
 
-`NowPlayingService` reads **SMTC**
-(`GlobalSystemMediaTransportControlsSessionManager`): track title, artist,
-album, artwork, timeline and play state, and drives play/pause/skip/seek on
-the current session. With no session (or SMTC unavailable) the transport
-buttons fall back to Windows **media keys**; volume always uses media keys.
+- **Shape**: `Controls/NotchShape` draws the black pill with concave "shoulders" at the
+  top edge and bottom corners that soften as it grows. Width/height are animated; all
+  content is clipped to the shape every frame, so nothing draws outside it.
+- **States**: *Peek* (collapsed: Nova, time or now playing, privacy dots, battery),
+  *Activity* (a few seconds of "Charging", "Volume 60%"…), *Expanded* (hover: status
+  chips + the tab bar). Opening: widen, drop from the top edge with a small spring;
+  content slides in. Closing: quick, straight up.
+- **Cost control**: the window is 600×64 while collapsed and 600×800 only while open
+  (a layered window is recomposited whole for every repaint). Live tabs (Stats) only
+  sample while open on them. Nova only blinks now and then, and never while hidden.
+  Measured idle: well under 1% of one core.
+- **Fullscreen**: `FullscreenWatcher` (foreground-change hook + a once-a-second check of
+  the front window) detects a fullscreen app on the notch's display. Then the notch is a
+  plain black pill: no content, no live messages, nothing animating; hovering ~0.5 s
+  still opens it.
+- Partial classes: `MainWindow.xaml.cs` (states, hover, placement, fullscreen),
+  `MainWindow.Widgets.cs` (clock, battery, privacy, media, volume, screenshot, live
+  messages), `MainWindow.Tabs.cs` (tabs, Settings, hotkeys, tray, clipboard paste-back,
+  power).
 
-## Dock
+## Tabs (`Views/Tabs`)
 
-Pins are `Label|Target` strings in settings. `ShellIconService` asks the
-Windows shell (`SHCreateItemFromParsingName` + `IShellItemImageFactory`) for
-each target's real high-res icon and display name — exe/lnk paths, bare exe
-names on PATH, and `shell:AppsFolder\<AUMID>` store apps. The HBITMAP is copied
-with `GetDIBits` into a premultiplied WPF bitmap (WPF's own HBITMAP import
-drops alpha). No icon → an iOS-style squircle with the label's initial.
+| Tab | Built on |
+|---|---|
+| Controls | `TogglesService` (WinRT `Radio`, network profiles, dark-mode registry + broadcast, night-light state), `AudioService` (Core Audio, speakers and microphone), `MusicCard` |
+| Today | `WeatherService` (Open-Meteo + geocoding), `CalendarService` (events.json, ICS import), `Controls/Ring` timer, `TodoService` (todos.json, in-app reminder timer) |
+| Stats | `SystemStatsService` (GetSystemTimes, memory, GPU via PDH), `ProcessMemoryService` (PDH private working set per app), `NetworkService` (adapter counters, ping, download test) |
+| Clipboard | `ClipboardService` (AddClipboardFormatListener; index.json + PNGs; skips copies marked private) |
+| Apps | `AppCatalogService` (Windows Apps folder via shell COM, cached; favourites, snippets, file-name index) |
+| Wallpaper | `WallpaperService` (IDesktopWallpaper; thumbnails cached on disk) |
+| Power | `PowerService` (LockWorkStation; Modern Standby → display off, else SetSuspendState; shutdown.exe) |
 
-Hover magnification scales the icon (1.3×, neighbours 1.1×) in place, sized
-so icons never overlap or leave the pill; launching hops it downward, a
-failed launch shakes it. Drop files/shortcuts to pin, right-click to remove.
+## Settings window
 
-## Timers
+`Views/SettingsWindow`: display, weather city, the two shortcuts (`HotkeyService`,
+RegisterHotKey), clipboard history, what the notch shows, start with Windows, version
+and uninstall. Opened by Ctrl+Alt+D, the tray icon, the notch's right-click menu or a
+second launch.
 
-`MainViewModel` owns one 200 ms ticker driving: wall clock, Pomodoro state
-machine (Focus 25 → Break 5 → Focus…), a free countdown and a stopwatch.
-Each tick advances timers by the *real* elapsed time (`Stopwatch`), so a busy
-UI thread delaying ticks can't make them drift.
-All state is plain `INotifyPropertyChanged`; the XAML binds and stays dumb.
+## Look
 
-## Screens / the notch
+Black, neutral greys and one green (`AccentBrush`); orange/red only for low battery and
+the microphone-in-use dot. One button system in `App.xaml` (`PillButton`, `PrimaryPill`,
+`OptionPill` chips, `RoundButton`). Icons are LapDock's own (`assets/icons/svg`), drawn
+as vectors by `Controls/LineIcon` from `LineIcons.cs` (generated by
+`tools/make_line_icons.py`); a few system glyphs (mic, camera, close…) still come from
+Segoe Fluent Icons.
 
-The window is a fixed-size, fully transparent layered window
-(`AllowsTransparency`), topmost, `WS_EX_TOOLWINDOW` (no taskbar, no Alt+Tab).
-Transparent pixels are click-through, so only the pill itself takes the mouse.
-`ScreenService.PlaceTopCenter` pins it flush to the top-centre of the chosen
-display with `SetWindowPos` in physical pixels: it first lands on the display
-(so a scaling change fires `WM_DPICHANGED` and rescales the window), then
-reads the real width and centres.
+## Data
 
-Hover opens the pill (width/height animation with a slight spring, contents
-cross-fade); leaving starts a 350 ms grace timer before closing. While any
-right-click menu is open the timer keeps re-checking instead of closing.
-
-The chosen display persists in settings; on first run LapDock picks the first
-non-primary display (the laptop panel when an external monitor is main).
-`SystemEvents.DisplaySettingsChanged` puts it back when monitors come and go.
-
-## System widgets
-
-One service per integration in `Services/`, each optional (settings flags), started in
-isolation (a failure hides that widget only), and **event-driven — nothing polls**:
-
-| Widget | Mechanism | Change signal |
-| --- | --- | --- |
-| Battery | WinRT `Windows.System.Power.PowerManager` (fallback: WinForms `PowerStatus`) | `RemainingChargePercentChanged`, `BatteryStatusChanged`, `PowerSupplyStatusChanged` |
-| Mic / camera | `HKCU\…\CapabilityAccessManager\ConsentStore\{microphone,webcam}` — per-app `LastUsedTimeStart/Stop`; Stop = 0 means in use. Desktop apps are only trusted while their exe runs (a crash can leave Stop = 0). Names: exe `FileDescription` / package `DisplayName` | `RegNotifyChangeKeyValue` on a background thread |
-| Media | SMTC `GlobalSystemMediaTransportControlsSessionManager` (`NowPlayingService`) | session/media/playback/timeline events; position ticks only while playing |
-| Volume | Core Audio `IMMDeviceEnumerator` → default render endpoint → `IAudioEndpointVolume` | `IAudioEndpointVolumeCallback` (own changes tagged with an event-context GUID), `IMMNotificationClient` for default-device changes |
-| Screenshot | Rectangle/Window: `ms-screenclip:?clippingMode=…` (legacy but honoured; the new `ms-screenclip://capture` needs an MSIX package). Full screen: Win+PrintScreen. Open: Snipping Tool AUMID | `FileSystemWatcher` on the Screenshots known folder |
-| Wallpaper | shell `IDesktopWallpaper` (get/set on all displays, fit style); thumbnails decoded small off-thread, cached | `SystemEvents.UserPreferenceChanged` (Desktop) |
-
-The notch has three states sharing one pill — **Peek**, **Activity** (a few seconds,
-de-duplicated, skipped while expanded) and **Expanded**. `ResizePill` runs the pending
-layout pass, then animates the pill only when the target size actually changes (each
-animation repaints the whole layered window). The only free-running animation is the
-music pulse, and only while something plays; the clock wakes once a minute.
-
-## Settings
-
-`%AppData%/LapDock/settings.json` — target screen device name, pinned apps,
-weather latitude/longitude/city, notes text. Loaded at startup, saved on change.
+`%AppData%\LapDock`: `settings.json`, `todos.json`, `events.json`, `favourites.json`,
+`snippets.json`, `apps-cache.json`, `clipboard\`, `thumbs\`, `error.log`.
