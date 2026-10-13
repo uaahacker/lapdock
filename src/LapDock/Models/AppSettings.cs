@@ -23,6 +23,14 @@ public class AppSettings
     /// <summary>The first default, which collides with Claude desktop's quick entry: upgraded on load.</summary>
     public const string OldSummonHotkey = "Ctrl+Alt+Space";
 
+    /// <summary>
+    /// When an app's window reaches the top of the screen:
+    /// "Reserve" — make room: the top strip is reserved, maximised apps start below the notch (default);
+    /// "AutoHide" — the notch slides away while a window is under it; push the mouse to the top edge to open it;
+    /// "Overlay" — stay on top of everything.
+    /// </summary>
+    public string NotchSpace { get; set; } = "Reserve";
+
     // ── Clipboard history (Clipboard tab) ──
     public bool ClipboardHistory { get; set; } = true;
     /// <summary>Opens the notch on the Clipboard tab. Note: apps lose their own Ctrl+Shift+V (paste as plain text) while it's set.</summary>
@@ -44,8 +52,14 @@ public class AppSettings
     public bool MicrophoneIndicator { get; set; } = true;
     public bool CameraIndicator { get; set; } = true;
     public bool MediaControls { get; set; } = true;
-    /// <summary>Short-lived notch messages: charging, low battery, mic in use, screenshot saved…</summary>
+    /// <summary>Short-lived notch messages: charging, low battery, mic in use, screenshot saved, downloads, devices…</summary>
     public bool DynamicNotifications { get; set; } = true;
+    /// <summary>Other apps' notifications (Teams, WhatsApp, Discord…) as a banner in the notch.</summary>
+    public bool AppNotifications { get; set; } = true;
+
+    /// <summary>Focus sessions finished on <see cref="FocusDay"/> (yyyy-MM-dd): the Today tab's count.</summary>
+    public string? FocusDay { get; set; }
+    public int FocusSessions { get; set; }
 
     /// <summary>Folders added in the Wallpaper tab ("Add folder"), searched three levels deep.</summary>
     public List<string> WallpaperFolders { get; set; } = new();

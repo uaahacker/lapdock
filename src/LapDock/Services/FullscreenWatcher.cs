@@ -35,6 +35,9 @@ public sealed class FullscreenWatcher : IDisposable
 
     public bool IsFullscreen { get; private set; }
 
+    /// <summary>An app window lies under the notch (its tab strip or title bar runs beneath the pill).</summary>
+    public bool IsTopCovered { get; private set; }
+
     /// <summary>UI thread (out-of-context hooks are delivered to the thread that set them).</summary>
     public event Action? Changed;
 
@@ -59,19 +62,46 @@ public sealed class FullscreenWatcher : IDisposable
     /// <summary>Re-evaluates now (also after display changes).</summary>
     public void Check()
     {
-        if (_disposed || new WindowInteropHelper(_owner).Handle == IntPtr.Zero) return; // the notch is gone (quitting)
+        var own = new WindowInteropHelper(_owner).Handle;
+        if (_disposed || own == IntPtr.Zero) return; // the notch is gone (quitting)
+        var screen = ToRect(ScreenService.ScreenOf(_owner).Bounds);
+        bool full = IsFullscreen;
         var foreground = GetForegroundWindow();
-        if (foreground == IntPtr.Zero) return;
         GetWindowThreadProcessId(foreground, out int pid);
-        if (pid == Environment.ProcessId) return; // the notch, Settings or the tray menu: keep the current state
-        var cls = ClassName(foreground);
-        if (Transient.Contains(cls)) return;
-
-        bool full = !Desktop.Contains(cls) && GetWindowRect(foreground, out var window)
-            && Covers(window, ToRect(ScreenService.ScreenOf(_owner).Bounds), IsZoomed(foreground));
-        if (full == IsFullscreen) return;
+        var cls = foreground == IntPtr.Zero ? "" : ClassName(foreground);
+        // Fullscreen is about the app in front. While the notch, Settings, the tray menu or a passing shell
+        // surface (Start, Alt+Tab…) has the focus, keep what we decided before.
+        if (foreground != IntPtr.Zero && pid != Environment.ProcessId && !Transient.Contains(cls))
+            full = !Desktop.Contains(cls) && GetWindowRect(foreground, out var window) && Covers(window, screen, IsZoomed(foreground));
+        // What lies under the notch doesn't depend on the focus at all.
+        bool covered = !full && SomethingUnder(own, screen);
+        if (full == IsFullscreen && covered == IsTopCovered) return;
         IsFullscreen = full;
+        IsTopCovered = covered;
         Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Is an app window right under the notch? Walks the windows below it, front to back, and probes the
+    /// top edge at the pill's middle and both ends. Skips what isn't really there: hidden, minimised,
+    /// cloaked (suspended store apps), click-through overlays, our own windows and the desktop.
+    /// </summary>
+    private static bool SomethingUnder(IntPtr own, RECT screen)
+    {
+        if (!GetWindowRect(own, out var notch)) return false;
+        int mid = (notch.Left + notch.Right) / 2, y = screen.Top + 4;
+        var probes = new[] { mid - 90, mid, mid + 90 };
+        for (var w = GetWindow(own, GW_HWNDNEXT); w != IntPtr.Zero; w = GetWindow(w, GW_HWNDNEXT))
+        {
+            if (!IsWindowVisible(w) || IsIconic(w)) continue;
+            if (DwmGetWindowAttribute(w, DWMWA_CLOAKED, out int cloaked, sizeof(int)) == 0 && cloaked != 0) continue;
+            if ((GetWindowLong(w, GWL_EXSTYLE) & WS_EX_TRANSPARENT) != 0) continue;
+            GetWindowThreadProcessId(w, out int pid);
+            if (pid == Environment.ProcessId || !GetWindowRect(w, out var r)) continue;
+            if (!probes.Any(x => x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom)) continue;
+            return !Desktop.Contains(ClassName(w)); // the first real window there decides
+        }
+        return false;
     }
 
     /// <summary>
@@ -126,5 +156,12 @@ public sealed class FullscreenWatcher : IDisposable
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out int pid);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
     [DllImport("user32.dll")] private static extern bool IsZoomed(IntPtr hwnd);
+    private const uint GW_HWNDNEXT = 2;
+    private const int GWL_EXSTYLE = -20, WS_EX_TRANSPARENT = 0x20, DWMWA_CLOAKED = 14;
+    [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr hwnd, uint cmd);
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern int GetWindowLong(IntPtr hwnd, int index);
+    [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out int value, int size);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd, StringBuilder name, int max);
 }

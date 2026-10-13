@@ -7,6 +7,7 @@ namespace LapDock.Services;
 /// System master volume + mute through Windows Core Audio (IAudioEndpointVolume) on the
 /// default output device. Change notifications are pushed by Windows — no polling — and
 /// the service re-attaches when the default output device changes (e.g. headphones).
+/// Also the output's live level (IAudioMeterInformation), which drives the notch's music bars.
 /// </summary>
 public sealed class AudioService : IDisposable
 {
@@ -17,18 +18,42 @@ public sealed class AudioService : IDisposable
     private readonly EDataFlow _flow;
     private IMMDeviceEnumerator? _enumerator;
     private IAudioEndpointVolume? _endpoint;
+    private IAudioMeterInformation? _meter;
+    private readonly float[] _peaks = new float[2];
     private readonly VolumeCallback _volumeCallback;
     private readonly DeviceCallback _deviceCallback;
 
     public bool Available => _endpoint is not null;
+    /// <summary>Levels can be read (<see cref="Levels"/>).</summary>
+    public bool HasMeter => _meter is not null;
     /// <summary>0..1</summary>
     public float Volume { get; private set; }
     public bool Muted { get; private set; }
     /// <summary>Friendly name of the default output, e.g. "Headphones (WH-1000XM4)".</summary>
     public string? DeviceName { get; private set; }
+    /// <summary>Headphones or a headset (wired, USB or Bluetooth), rather than speakers.</summary>
+    public bool IsHeadphones { get; private set; }
 
     /// <summary>UI thread. true = changed outside LapDock (keyboard keys, other apps).</summary>
     public event Action<bool>? Changed;
+    /// <summary>UI thread: Windows switched to another output (headphones connected, back to speakers…).</summary>
+    public event Action? OutputChanged;
+
+    /// <summary>What's playing right now, left and right, 0..1 (silence = 0).</summary>
+    public (float Left, float Right) Levels
+    {
+        get
+        {
+            if (_meter is null) return default;
+            try
+            {
+                _peaks[0] = _peaks[1] = 0;
+                if (_meter.GetChannelsPeakValues(2, _peaks) != 0) { _meter.GetPeakValue(out var p); return (p, p); } // mono
+                return (_peaks[0], _peaks[1]);
+            }
+            catch (Exception) { return default; }
+        }
+    }
 
     /// <param name="capture">true = the default microphone instead of the default speakers.</param>
     public AudioService(Dispatcher dispatcher, bool capture = false)
@@ -52,6 +77,7 @@ public sealed class AudioService : IDisposable
 
     private void Attach()
     {
+        var previous = DeviceName;
         Detach();
         if (_enumerator is null) return;
         try
@@ -60,6 +86,14 @@ public sealed class AudioService : IDisposable
             var iid = typeof(IAudioEndpointVolume).GUID;
             device.Activate(ref iid, 0x17 /* CLSCTX_ALL */, IntPtr.Zero, out var obj);
             DeviceName = FriendlyName(device);
+            IsHeadphones = FormFactor(device) is 3 or 5; // Headphones, Headset
+            try
+            {
+                var meterIid = typeof(IAudioMeterInformation).GUID;
+                device.Activate(ref meterIid, 0x17, IntPtr.Zero, out var meter);
+                _meter = (IAudioMeterInformation)meter;
+            }
+            catch (Exception) { _meter = null; } // no levels: the music bars fall back to a gentle wave
             Marshal.ReleaseComObject(device);
             _endpoint = (IAudioEndpointVolume)obj;
             _endpoint.RegisterControlChangeNotify(_volumeCallback);
@@ -70,10 +104,12 @@ public sealed class AudioService : IDisposable
         }
         catch (Exception) { _endpoint = null; DeviceName = null; } // no output device at all
         Changed?.Invoke(false);
+        if (previous is not null && DeviceName is not null && DeviceName != previous) OutputChanged?.Invoke();
     }
 
     private void Detach()
     {
+        if (_meter is not null) { Marshal.ReleaseComObject(_meter); _meter = null; }
         if (_endpoint is null) return;
         try { _endpoint.UnregisterControlChangeNotify(_volumeCallback); } catch (Exception) { }
         Marshal.ReleaseComObject(_endpoint);
@@ -121,6 +157,33 @@ public sealed class AudioService : IDisposable
         _enumerator = null;
     }
 
+    /// <summary>PKEY_AudioEndpoint_FormFactor: 1 speakers, 3 headphones, 5 headset… (-1 = unknown).</summary>
+    private static int FormFactor(IMMDevice device)
+    {
+        IPropertyStore? store = null;
+        var pv = new PROPVARIANT();
+        try
+        {
+            device.OpenPropertyStore(0, out store);
+            var key = PKEY_AudioEndpoint_FormFactor;
+            store.GetValue(ref key, out pv);
+            return pv.vt == 19 /* VT_UI4 */ ? (int)(pv.pointer.ToInt64() & 0xFFFFFFFF) : -1;
+        }
+        catch (Exception) { return -1; }
+        finally
+        {
+            PropVariantClear(ref pv);
+            if (store is not null) Marshal.ReleaseComObject(store);
+        }
+    }
+
+    /// <summary>"Headphones (AirPods Pro)" → "AirPods Pro": the device, without the endpoint's role.</summary>
+    public static string ShortName(string friendlyName)
+    {
+        int open = friendlyName.IndexOf(" (", StringComparison.Ordinal);
+        return open > 0 && friendlyName.EndsWith(')') ? friendlyName[(open + 2)..^1] : friendlyName;
+    }
+
     private static string? FriendlyName(IMMDevice device)
     {
         IPropertyStore? store = null;
@@ -143,6 +206,8 @@ public sealed class AudioService : IDisposable
     // ------------------------------------------------------------------ interop
     private static readonly PROPERTYKEY PKEY_Device_FriendlyName =
         new() { fmtid = new Guid("A45C254E-DF1C-4EFD-8020-67D146A850E0"), pid = 14 };
+    private static readonly PROPERTYKEY PKEY_AudioEndpoint_FormFactor =
+        new() { fmtid = new Guid("1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E"), pid = 0 };
 
     [StructLayout(LayoutKind.Sequential)]
     private struct PROPVARIANT { public ushort vt; public ushort r1, r2, r3; public IntPtr pointer, pointer2; }
@@ -220,6 +285,15 @@ public sealed class AudioService : IDisposable
         void GetChannelVolumeLevelScalar(uint channel, out float level);
         void SetMute([MarshalAs(UnmanagedType.Bool)] bool mute, ref Guid context);
         void GetMute([MarshalAs(UnmanagedType.Bool)] out bool mute);
+    }
+
+    [ComImport, Guid("C02216F6-8C67-4B5B-9D00-D008E73E0064"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IAudioMeterInformation
+    {
+        void GetPeakValue(out float peak);
+        void GetMeteringChannelCount(out uint count);
+        [PreserveSig] int GetChannelsPeakValues(uint count, [MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 0)] float[] peaks);
+        void QueryHardwareSupport(out uint mask);
     }
 
     [ComImport, Guid("657804FA-D6AD-4496-8A60-352752AF4F89"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
