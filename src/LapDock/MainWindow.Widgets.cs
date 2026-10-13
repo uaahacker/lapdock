@@ -12,8 +12,8 @@ using Microsoft.Win32;
 namespace LapDock;
 
 /// <summary>
-/// System widgets: clock, battery, privacy (mic/camera), now playing, volume, screenshot,
-/// wallpaper — plus the short-lived "activity" messages they raise. Every widget is optional
+/// System widgets: clock, battery, privacy (mic/camera), now playing, volume, screenshot —
+/// plus the short-lived "activity" messages they raise. Every widget is optional
 /// (AppSettings flags) and starts in isolation, so one failing never takes the notch down.
 /// </summary>
 public partial class MainWindow
@@ -29,11 +29,10 @@ public partial class MainWindow
     private readonly DispatcherTimer _activityTimer = new() { Interval = TimeSpan.FromSeconds(2.8) };
     private readonly DispatcherTimer _trackTimer = new() { Interval = TimeSpan.FromMilliseconds(700) };
 
-    private string? _panel;            // open detail panel: snip | volume | wallpaper | battery | privacy
+    private string? _panel;            // open chip panel: snip | battery | privacy
     private string? _lastTrack;        // "title|artist" last announced
-    private string? _wallpaperPath;
     private (string Text, DateTime At) _lastNotice;
-    private bool _seeking, _updatingVolume, _mediaReady;
+    private bool _mediaReady;
     private int _eqTick;
 
     private Brush Res(string key) => (Brush)FindResource(key);
@@ -46,7 +45,6 @@ public partial class MainWindow
         _clockTimer.Tick += (_, _) => UpdateClock();
         UpdateClock();
         _clockTimer.Start();
-        BuildWallpaperStyles();
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
 
         if (_settings.ShowBattery)
@@ -58,14 +56,11 @@ public partial class MainWindow
 
         if (_settings.MediaControls)
         {
-            MediaCard.DataContext = _nowPlaying;
             _nowPlaying.PropertyChanged += OnNowPlayingChanged;
             await _nowPlaying.InitializeAsync(); // handles its own failures (SMTC unavailable → no media section)
             _lastTrack = TrackKey(); // don't announce what was already playing at startup
         }
         _mediaReady = true;
-        UpdateMediaControls();
-        UpdateVolumeUi();
         RefreshAll();
     }
 
@@ -101,7 +96,8 @@ public partial class MainWindow
         PeekTitle.Text = _nowPlaying.Title;
         PeekTitle.Visibility = Show(media);
         PeekEq.Visibility = Show(media);
-        _eqTimer.IsEnabled = media; // the only animation that runs on its own, and only while music plays
+        _eqTimer.IsEnabled = media && !Quiet; // the only animation that runs on its own: only while music plays, never over fullscreen apps
+        UpdateNova();
         PeekTime.Visibility = Show(!media && _settings.ShowClock);
 
         var p = _privacy?.Current ?? PrivacyState.None;
@@ -155,8 +151,6 @@ public partial class MainWindow
         ChipBatteryGlyph.Text = BatteryGlyph(b);
         ChipBatteryGlyph.Foreground = BatteryBrush(b);
 
-        MediaCard.Visibility = Show(_settings.MediaControls && _nowPlaying.HasSession);
-        VolumeTool.Visibility = Show(_audio?.Available == true);
 
         if (_panel is not null) RefreshPanel(_panel);
         if (_mode == Mode.Expanded) ResizePill();
@@ -166,14 +160,9 @@ public partial class MainWindow
     {
         _panel = name;
         SnipPanel.Visibility = Show(name == "snip");
-        VolumePanel.Visibility = Show(name == "volume");
-        WallpaperPanel.Visibility = Show(name == "wallpaper");
         BatteryPanel.Visibility = Show(name == "battery");
         PrivacyPanel.Visibility = Show(name == "privacy");
         PanelHost.Visibility = Show(name is not null);
-        SnipTool.Tag = name == "snip" ? "on" : null;
-        VolumeTool.Tag = name == "volume" ? "on" : null;
-        WallpaperTool.Tag = name == "wallpaper" ? "on" : null;
         if (name is not null) RefreshPanel(name);
         if (_mode == Mode.Expanded) ResizePill();
     }
@@ -184,20 +173,16 @@ public partial class MainWindow
     {
         switch (name)
         {
-            case "volume": UpdateVolumeUi(); break;
-            case "wallpaper": _ = RefreshWallpaperPanelAsync(); break;
             case "battery": UpdateBatteryPanel(); break;
             case "privacy": UpdatePrivacyPanel(); break;
         }
     }
 
-    private void SnipTool_Click(object sender, RoutedEventArgs e) => TogglePanel("snip");
-    private void VolumeTool_Click(object sender, RoutedEventArgs e) => TogglePanel("volume");
-    private void WallpaperTool_Click(object sender, RoutedEventArgs e) => TogglePanel("wallpaper");
+    private void SnipChip_Click(object sender, RoutedEventArgs e) => TogglePanel("snip");
     private void BatteryChip_Click(object sender, RoutedEventArgs e) => TogglePanel("battery");
     private void PrivacyChip_Click(object sender, RoutedEventArgs e) => TogglePanel("privacy");
 
-    private static void OpenUri(string uri)
+    internal static void OpenUri(string uri)
     {
         try { Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true }); }
         catch (Exception) { /* nothing registered for it — nothing to open */ }
@@ -209,16 +194,21 @@ public partial class MainWindow
     /// information is on screen). Repeats of the same key update in place instead of re-animating.
     /// </summary>
     private void Notify(string key, string glyph, string title, string detail, double? progress = null,
-        Brush? accent = null, ImageSource? art = null)
+        Brush? accent = null, ImageSource? art = null, double seconds = 2.8)
     {
-        if (!_settings.DynamicNotifications || _mode == Mode.Expanded) return;
+        if (!_settings.DynamicNotifications || _mode == Mode.Expanded || Quiet) return; // nothing pops up over a fullscreen app
         var text = title + "|" + detail;
         if (_mode != Mode.Activity && _lastNotice.Text == text && DateTime.UtcNow - _lastNotice.At < TimeSpan.FromSeconds(5)) return;
         _lastNotice = (text, DateTime.UtcNow);
 
-        ActivityGlyph.Text = glyph;
+        // glyph: one of LapDock's icon names ("volume"), or a single Segoe glyph for what the pack doesn't draw.
+        bool named = glyph.Length > 1;
+        ActivityGlyph.Text = named ? "" : glyph;
         ActivityGlyph.Foreground = accent ?? Res("TextBrush");
-        ActivityGlyph.Visibility = Show(art is null);
+        ActivityGlyph.Visibility = Show(art is null && !named);
+        ActivityIcon2.Icon = named ? glyph : null;
+        ActivityIcon2.Foreground = accent ?? Res("TextBrush");
+        ActivityIcon2.Visibility = Show(art is null && named);
         ActivityIcon.Background = art is null ? Res("FillBrush") : new ImageBrush(art) { Stretch = Stretch.UniformToFill };
         ActivityTitle.Text = title;
         ActivityDetail.Text = detail;
@@ -228,6 +218,7 @@ public partial class MainWindow
         ActivityBar.Foreground = accent ?? Res("TextBrush");
 
         _activityTimer.Stop();
+        _activityTimer.Interval = TimeSpan.FromSeconds(seconds);
         _activityTimer.Start();
         if (_mode == Mode.Activity) ResizePill();
         else SetMode(Mode.Activity);
@@ -243,7 +234,7 @@ public partial class MainWindow
         {
             if (now.PluggedIn)
                 Notify("battery", BatteryGlyph(now), now.State == BatteryState.Full ? "Fully charged" : now.Charging ? "Charging" : "Plugged in",
-                    $"{now.Percent}%", level, Res("GreenBrush"));
+                    $"{now.Percent}%", level, Res("AccentBrush"));
             else
                 Notify("battery", BatteryGlyph(now), "On battery", $"{now.Percent}%{TimeLeft(now, " · ")}", level, BatteryBrush(now));
         }
@@ -256,7 +247,7 @@ public partial class MainWindow
                 case BatteryState.Critical:
                     Notify("battery", BatteryGlyph(now), "Battery critically low", $"{now.Percent}% · plug in now", level, Res("RedBrush")); break;
                 case BatteryState.Full:
-                    Notify("battery", BatteryGlyph(now), "Fully charged", "100% — you can unplug", level, Res("GreenBrush")); break;
+                    Notify("battery", BatteryGlyph(now), "Fully charged", "100% — you can unplug", level, Res("AccentBrush")); break;
             }
         }
     }
@@ -267,7 +258,7 @@ public partial class MainWindow
         BatteryBig.Text = $"{b.Percent}%";
         BatteryStatus.Text = BatteryStatusText(b);
         BatteryBar.Value = b.Percent;
-        BatteryBar.Foreground = b.State is BatteryState.Low or BatteryState.Critical ? BatteryBrush(b) : Res("GreenBrush");
+        BatteryBar.Foreground = b.State is BatteryState.Low or BatteryState.Critical ? BatteryBrush(b) : Res("AccentBrush");
     }
 
     /// <summary>Segoe Fluent battery glyphs: Battery0–10 at U+EBA0, BatteryCharging0–10 at U+EBAB.</summary>
@@ -281,7 +272,7 @@ public partial class MainWindow
     {
         BatteryState.Critical => Res("RedBrush"),
         BatteryState.Low => Res("OrangeBrush"),
-        _ => b.Charging ? Res("GreenBrush") : Res("TextBrush"),
+        _ => b.Charging ? Res("AccentBrush") : Res("TextBrush"),
     };
 
     private static string BatteryStatusText(BatteryInfo b)
@@ -306,7 +297,7 @@ public partial class MainWindow
         if (_settings.MicrophoneIndicator && now.Microphone.Except(old.Microphone).Any())
             Notify("mic", "", "Microphone in use", string.Join(", ", now.Microphone), accent: Res("OrangeBrush"));
         else if (_settings.CameraIndicator && now.Camera.Except(old.Camera).Any())
-            Notify("camera", "", "Camera in use", string.Join(", ", now.Camera), accent: Res("GreenBrush"));
+            Notify("camera", "", "Camera in use", string.Join(", ", now.Camera), accent: Res("AccentBrush"));
     }
 
     private void UpdatePrivacyPanel()
@@ -317,7 +308,7 @@ public partial class MainWindow
         PrivacyMicGlyph.Foreground = p.MicrophoneInUse ? Res("OrangeBrush") : Res("MutedBrush");
         PrivacyCamRow.Visibility = Show(_settings.CameraIndicator);
         PrivacyCamText.Text = p.CameraInUse ? "In use by " + string.Join(", ", p.Camera) : "Not in use";
-        PrivacyCamGlyph.Foreground = p.CameraInUse ? Res("GreenBrush") : Res("MutedBrush");
+        PrivacyCamGlyph.Foreground = p.CameraInUse ? Res("AccentBrush") : Res("MutedBrush");
     }
 
     private void PrivacySettings_Click(object sender, RoutedEventArgs e) =>
@@ -332,10 +323,8 @@ public partial class MainWindow
             case nameof(NowPlayingService.Position):
             case nameof(NowPlayingService.PositionSeconds):
             case nameof(NowPlayingService.PositionText):
-                if (!_seeking) SeekBar.Value = _nowPlaying.PositionSeconds; // the 2×/s tick: cheap path only
-                return;
+                return; // the 2×/s tick: MusicCard moves its own seek bar
         }
-        UpdateMediaControls();
         RefreshAll();
         if (e.PropertyName is nameof(NowPlayingService.Title) or nameof(NowPlayingService.Artist) or nameof(NowPlayingService.IsPlaying))
         {
@@ -352,67 +341,17 @@ public partial class MainWindow
         if (!_mediaReady || !_nowPlaying.IsPlaying || TrackKey() is not { } key || key == _lastTrack) return;
         _lastTrack = key;
         var detail = string.IsNullOrEmpty(_nowPlaying.Artist) ? _nowPlaying.Title : $"{_nowPlaying.Title} — {_nowPlaying.Artist}";
-        Notify("media", "", "Now playing", detail, art: _nowPlaying.Artwork);
-    }
-
-    private void UpdateMediaControls()
-    {
-        PlayButton.Content = _nowPlaying.IsPlaying ? "" : "";
-        if (!_seeking)
-        {
-            SeekBar.Maximum = Math.Max(1, _nowPlaying.DurationSeconds);
-            SeekBar.Value = _nowPlaying.PositionSeconds;
-        }
-        SeekBar.IsEnabled = _nowPlaying.CanSeek;
-    }
-
-    private async void PlayPause_Click(object sender, RoutedEventArgs e) => await _nowPlaying.TogglePlayPauseAsync();
-    private async void Prev_Click(object sender, RoutedEventArgs e) => await _nowPlaying.PreviousAsync();
-    private async void Next_Click(object sender, RoutedEventArgs e) => await _nowPlaying.NextAsync();
-    private void SeekBar_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e) => _seeking = true;
-    private async void SeekBar_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e) => await FinishSeekAsync();
-    private async void SeekBar_LostMouseCapture(object sender, MouseEventArgs e) => await FinishSeekAsync();
-
-    private async Task FinishSeekAsync()
-    {
-        if (!_seeking) return;
-        _seeking = false;
-        await _nowPlaying.SeekAsync(TimeSpan.FromSeconds(SeekBar.Value));
+        Notify("media", "music", "Now playing", detail, art: _nowPlaying.Artwork);
     }
 
     // ---------------------------------------------------------------- volume
+    // The slider and mute live in the Controls tab; the notch only announces changes made elsewhere.
     private void OnVolumeChanged(bool external)
     {
-        UpdateVolumeUi();
         if (external && _audio is { Available: true } a)
-            Notify("volume", VolumeGlyph(), a.Muted ? "Muted" : "Volume", a.Muted ? "" : $"{Math.Round(a.Volume * 100)}%",
+            Notify("volume", "volume", a.Muted ? "Muted" : "Volume", a.Muted ? "" : $"{Math.Round(a.Volume * 100)}%",
                 a.Muted ? 0 : a.Volume);
     }
-
-    private void UpdateVolumeUi()
-    {
-        if (_audio is not { Available: true } a) return;
-        int percent = (int)Math.Round(a.Volume * 100);
-        _updatingVolume = true;
-        VolumeSlider.Value = percent;
-        _updatingVolume = false;
-        var glyph = VolumeGlyph();
-        VolumeValue.Text = a.Muted ? "Muted" : $"{percent}%";
-        MuteButton.Content = glyph;
-        VolumeToolGlyph.Text = glyph;
-        VolumeToolText.Text = a.Muted ? "Muted" : $"{percent}%";
-    }
-
-    private string VolumeGlyph() => _audio is not { } a || a.Muted ? ""
-        : a.Volume < 0.01 ? "" : a.Volume < 0.34 ? "" : a.Volume < 0.67 ? "" : "";
-
-    private void VolumeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-    {
-        if (!_updatingVolume) _audio?.SetVolume((float)(e.NewValue / 100));
-    }
-
-    private void Mute_Click(object sender, RoutedEventArgs e) => _audio?.ToggleMute();
-    private void SoundSettings_Click(object sender, RoutedEventArgs e) => OpenUri("ms-settings:sound");
 
     // ------------------------------------------------------------ screenshot
     // The notch collapses first so it isn't in the way of the capture.
@@ -434,102 +373,10 @@ public partial class MainWindow
         Notify("screenshot", "", "Screenshot saved", Path.GetFileName(path), accent: Res("AccentBrush"));
 
     // ------------------------------------------------------------- wallpaper
-    private void BuildWallpaperStyles()
-    {
-        foreach (var style in new[] { WallpaperStyle.Fill, WallpaperStyle.Fit, WallpaperStyle.Stretch,
-                                      WallpaperStyle.Tile, WallpaperStyle.Center, WallpaperStyle.Span })
-        {
-            var pill = new Button { Content = style.ToString(), Style = (Style)FindResource("OptionPill") };
-            pill.Click += async (_, _) =>
-            {
-                try { await WallpaperService.SetStyle(style); }
-                catch (Exception ex) { WallpaperMessage($"Couldn't change the fit: {ex.Message}"); }
-                await RefreshWallpaperPanelAsync();
-            };
-            WallpaperStyles.Children.Add(pill);
-        }
-    }
-
-    private async Task RefreshWallpaperPanelAsync()
-    {
-        _wallpaperPath = WallpaperService.Current();
-        WallpaperName.Text = _wallpaperPath is null ? "No picture (colour or Spotlight)" : Path.GetFileName(_wallpaperPath);
-        WallpaperName.ToolTip = _wallpaperPath;
-        var style = WallpaperService.CurrentStyle()?.ToString();
-        foreach (Button pill in WallpaperStyles.Children)
-            pill.Tag = (string)pill.Content == style ? "on" : null;
-
-        var recent = _settings.RecentWallpapers.Where(File.Exists).Take(5).ToList();
-        RecentLabel.Visibility = Show(recent.Count > 0);
-        RecentWallpapers.Children.Clear();
-        foreach (var path in recent)
-        {
-            var thumb = new Border { Width = 64, Height = 36, CornerRadius = new CornerRadius(6), Background = Res("FillBrush") };
-            var button = new Button { Style = (Style)FindResource("DockIcon"), Content = thumb, Margin = new Thickness(0, 0, 6, 0), ToolTip = Path.GetFileName(path) };
-            button.Click += async (_, _) => await ApplyWallpaperAsync(path);
-            RecentWallpapers.Children.Add(button);
-            _ = LoadThumbAsync(thumb, path);
-        }
-        if (_mode == Mode.Expanded) ResizePill();
-
-        WallpaperPreview.ImageSource = _wallpaperPath is null ? null : await WallpaperService.Thumbnail(_wallpaperPath, 300);
-    }
-
-    private static async Task LoadThumbAsync(Border target, string path)
-    {
-        if (await WallpaperService.Thumbnail(path, 128) is { } image)
-            target.Background = new ImageBrush(image) { Stretch = Stretch.UniformToFill };
-    }
-
-    private async Task ApplyWallpaperAsync(string path)
-    {
-        try
-        {
-            await WallpaperService.Apply(path, WallpaperService.CurrentStyle() ?? WallpaperStyle.Fill);
-            _settings.RecentWallpapers.RemoveAll(p => p.Equals(path, StringComparison.OrdinalIgnoreCase));
-            _settings.RecentWallpapers.Insert(0, path);
-            if (_settings.RecentWallpapers.Count > 10) _settings.RecentWallpapers.RemoveRange(10, _settings.RecentWallpapers.Count - 10);
-            SettingsService.Save(_settings);
-            WallpaperMessage($"Wallpaper changed to {Path.GetFileName(path)}.");
-            Notify("wallpaper", "", "Wallpaper changed", Path.GetFileName(path), accent: Res("AccentBrush"));
-        }
-        catch (Exception ex)
-        {
-            WallpaperMessage($"Couldn't set the wallpaper: {ex.Message}");
-        }
-        await RefreshWallpaperPanelAsync();
-    }
-
-    private void WallpaperMessage(string text)
-    {
-        WallpaperStatus.Text = text;
-        WallpaperStatus.Visibility = Visibility.Visible;
-        if (_mode == Mode.Expanded) ResizePill();
-    }
-
-    private async void WallpaperBrowse_Click(object sender, RoutedEventArgs e)
-    {
-        var dialog = new OpenFileDialog
-        {
-            Title = "Choose a wallpaper",
-            Filter = "Pictures|" + string.Join(";", WallpaperService.Extensions.Select(x => "*" + x)) + "|All files|*.*",
-            InitialDirectory = Path.GetDirectoryName(_wallpaperPath) ?? Environment.GetFolderPath(Environment.SpecialFolder.MyPictures),
-        };
-        if (Modal(() => dialog.ShowDialog(this)) == true) await ApplyWallpaperAsync(dialog.FileName);
-    }
-
-    private async void WallpaperNext_Click(object sender, RoutedEventArgs e)
-    {
-        if (WallpaperService.Next(_wallpaperPath, _settings.RecentWallpapers) is { } next) await ApplyWallpaperAsync(next);
-        else WallpaperMessage("No other pictures in this folder or in Recent — use Change… to pick one.");
-    }
-
-    private void WallpaperPreview_Click(object sender, RoutedEventArgs e) => OpenUri("ms-settings:personalization-background");
-
-    /// <summary>Wallpaper changed elsewhere (Settings, another app): keep the open panel truthful.</summary>
+    /// <summary>Wallpaper changed elsewhere (Settings, another app): keep the Wallpaper tab truthful.</summary>
     private void OnUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
     {
         if (e.Category == UserPreferenceCategory.Desktop)
-            Dispatcher.BeginInvoke(() => { if (_panel == "wallpaper") _ = RefreshWallpaperPanelAsync(); });
+            Dispatcher.BeginInvoke(() => { if (Tabs.SelectedItem == WallpaperTabItem) WallpaperPage.RefreshCurrent(); });
     }
 }
