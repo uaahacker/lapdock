@@ -1,0 +1,117 @@
+<UserControl x:Class="LapDock.Views.Tabs.StatsTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:LapDock.Controls"
+             Foreground="{StaticResource TextBrush}">
+    <UserControl.Resources>
+        <Style x:Key="StatCard" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource PanelTileBrush}"/>
+            <Setter Property="CornerRadius" Value="{StaticResource TileRadius}"/>
+            <Setter Property="Padding" Value="14,12"/>
+        </Style>
+        <Style x:Key="CardTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+        </Style>
+        <Style x:Key="GaugeRing" TargetType="controls:Ring">
+            <Setter Property="Width" Value="100"/>
+            <Setter Property="Height" Value="100"/>
+            <Setter Property="StrokeWidth" Value="9"/>
+            <Setter Property="RingBrush" Value="{StaticResource AccentBrush}"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="GaugeLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,10,0,0"/>
+        </Style>
+        <Style x:Key="GaugeDetail" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="TextLink" TargetType="Button" BasedOn="{StaticResource PillButton}">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
+            <Setter Property="Padding" Value="6,2"/>
+            <Setter Property="FontSize" Value="11.5"/>
+        </Style>
+    </UserControl.Resources>
+
+    <StackPanel>
+        <!-- The gauges: the one loud thing on this page -->
+        <UniformGrid x:Name="Gauges" Columns="3" Margin="0,0,-10,0">
+            <Border Style="{StaticResource StatCard}" Margin="0,0,10,0" Padding="10,16,10,14">
+                <StackPanel>
+                    <controls:Ring x:Name="CpuRing" Style="{StaticResource GaugeRing}">
+                        <TextBlock FontFamily="{StaticResource DisplayFont}"><Run x:Name="CpuValue" Text="0" FontSize="30" FontWeight="Light"/><Run Text="%" FontSize="13" Foreground="{StaticResource MutedBrush}"/></TextBlock>
+                    </controls:Ring>
+                    <TextBlock Text="CPU" Style="{StaticResource GaugeLabel}"/>
+                    <TextBlock x:Name="CpuDetail" Style="{StaticResource GaugeDetail}"/>
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource StatCard}" Margin="0,0,10,0" Padding="10,16,10,14">
+                <StackPanel>
+                    <controls:Ring x:Name="RamRing" Style="{StaticResource GaugeRing}">
+                        <TextBlock FontFamily="{StaticResource DisplayFont}"><Run x:Name="RamValue" Text="0" FontSize="30" FontWeight="Light"/><Run Text="%" FontSize="13" Foreground="{StaticResource MutedBrush}"/></TextBlock>
+                    </controls:Ring>
+                    <TextBlock Text="Memory" Style="{StaticResource GaugeLabel}"/>
+                    <TextBlock x:Name="RamDetail" Style="{StaticResource GaugeDetail}"/>
+                </StackPanel>
+            </Border>
+            <Border x:Name="GpuCard" Style="{StaticResource StatCard}" Margin="0,0,10,0" Padding="10,16,10,14">
+                <StackPanel>
+                    <controls:Ring x:Name="GpuRing" Style="{StaticResource GaugeRing}">
+                        <TextBlock FontFamily="{StaticResource DisplayFont}"><Run x:Name="GpuValue" Text="–" FontSize="30" FontWeight="Light"/><Run x:Name="GpuUnit" Text="%" FontSize="13" Foreground="{StaticResource MutedBrush}"/></TextBlock>
+                    </controls:Ring>
+                    <TextBlock Text="GPU" Style="{StaticResource GaugeLabel}"/>
+                    <TextBlock Text="3D load" Style="{StaticResource GaugeDetail}"/>
+                </StackPanel>
+            </Border>
+        </UniformGrid>
+
+        <Grid Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="176"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Top apps by memory -->
+            <Border Style="{StaticResource StatCard}" Margin="0,0,10,0">
+                <StackPanel>
+                    <DockPanel Margin="0,0,0,8">
+                        <Button DockPanel.Dock="Right" Content="Task Manager" Style="{StaticResource TextLink}" Margin="0,-3,-6,0" Click="TaskManager_Click"/>
+                        <TextBlock Text="Top apps by memory" Style="{StaticResource CardTitle}"/>
+                    </DockPanel>
+                    <StackPanel x:Name="AppList"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Internet -->
+            <Border Grid.Column="1" Style="{StaticResource StatCard}">
+                <StackPanel>
+                    <TextBlock Text="Internet" Style="{StaticResource CardTitle}" Margin="0,0,0,10"/>
+                    <DockPanel Margin="0,0,0,4">
+                        <TextBlock Text="&#xE896;" Style="{StaticResource Icon}" FontSize="13" Foreground="{StaticResource AccentBrush}" Margin="0,0,8,0"/>
+                        <TextBlock x:Name="DownRate" FontSize="13" FontWeight="SemiBold"/>
+                    </DockPanel>
+                    <DockPanel Margin="0,0,0,4">
+                        <TextBlock Text="&#xE898;" Style="{StaticResource Icon}" FontSize="13" Foreground="{StaticResource MutedBrush}" Margin="0,0,8,0"/>
+                        <TextBlock x:Name="UpRate" FontSize="13" FontWeight="SemiBold"/>
+                    </DockPanel>
+                    <TextBlock x:Name="PingText" FontSize="12" Foreground="{StaticResource MutedBrush}" Text="Ping –"/>
+
+                    <Border Height="1" Background="#26FFFFFF" Margin="0,12,0,10"/>
+
+                    <TextBlock x:Name="SpeedValue" FontFamily="{StaticResource DisplayFont}" FontSize="28" FontWeight="Light" Visibility="Collapsed"/>
+                    <TextBlock x:Name="SpeedStatus" FontSize="11.5" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"
+                               Text="Measure your download speed"/>
+                    <Button x:Name="SpeedButton" Content="Test speed" Style="{StaticResource PrimaryPill}" Padding="14,5" FontSize="12"
+                            HorizontalAlignment="Left" Margin="0,10,0,0" Click="TestSpeed_Click"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </StackPanel>
+</UserControl>

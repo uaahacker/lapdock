@@ -1,0 +1,109 @@
+<UserControl x:Class="LapDock.Views.Tabs.WallpaperTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:LapDock.Controls"
+             xmlns:local="clr-namespace:LapDock.Views.Tabs"
+             Foreground="{StaticResource TextBrush}">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="Vis"/>
+
+        <Style x:Key="FitPill" TargetType="Button" BasedOn="{StaticResource OptionPill}">
+            <Setter Property="Padding" Value="9,3"/>
+            <Setter Property="Margin" Value="4,0,0,0"/>
+        </Style>
+
+        <!-- A thumbnail is the button: no chrome, a faint wash on hover. -->
+        <Style x:Key="ThumbButton" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <ContentPresenter/>
+                            <Border x:Name="Wash" Background="White" Opacity="0" CornerRadius="10"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Wash" Property="Opacity" Value="0.1"/></Trigger>
+                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="Wash" Property="Opacity" Value="0.2"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <DataTemplate DataType="{x:Type local:WallpaperThumb}">
+            <Button Style="{StaticResource ThumbButton}" Margin="3" ToolTip="{Binding Name}" Click="Thumb_Click">
+                <Grid Height="68">
+                    <Border CornerRadius="10" Background="{StaticResource PanelFillBrush}"/>
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="{Binding IsAdd, Converter={StaticResource Vis}}">
+                        <TextBlock Text="&#xE710;" Style="{StaticResource Icon}" FontSize="15" Foreground="{StaticResource TextBrush}" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Add folder" FontSize="11.5" Margin="0,5,0,0"/>
+                    </StackPanel>
+                    <Border CornerRadius="10">
+                        <Border.Background><ImageBrush ImageSource="{Binding Image}" Stretch="UniformToFill"/></Border.Background>
+                    </Border>
+                    <Border CornerRadius="10" BorderBrush="{StaticResource AccentBrush}" BorderThickness="2.5"
+                            Visibility="{Binding IsCurrent, Converter={StaticResource Vis}}"/>
+                </Grid>
+            </Button>
+        </DataTemplate>
+
+        <!-- The grid is a virtualised list of 4-picture rows: only rows on screen exist or load thumbnails. -->
+        <DataTemplate DataType="{x:Type local:WallpaperRow}">
+            <ItemsControl ItemsSource="{Binding Items}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><UniformGrid Columns="4" Rows="1"/></ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+            </ItemsControl>
+        </DataTemplate>
+
+        <Style x:Key="PlainRow" TargetType="ListBoxItem">
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem"><ContentPresenter/></ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <StackPanel>
+        <!-- What the desktop shows right now -->
+        <Button Style="{StaticResource ThumbButton}" ToolTip="Open background settings" Click="Preview_Click">
+            <Grid Height="186">
+                <Border CornerRadius="16" Background="{StaticResource PanelTileBrush}">
+                    <controls:LineIcon Icon="wallpaper" Width="30" Height="30" Foreground="{StaticResource MutedBrush}"/>
+                </Border>
+                <Border CornerRadius="16">
+                    <Border.Background><ImageBrush x:Name="PreviewBrush" Stretch="UniformToFill"/></Border.Background>
+                </Border>
+                <Border CornerRadius="0,0,16,16" VerticalAlignment="Bottom" Height="72">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Color="#00000000" Offset="0"/>
+                            <GradientStop Color="#B3000000" Offset="1"/>
+                        </LinearGradientBrush>
+                    </Border.Background>
+                    <StackPanel VerticalAlignment="Bottom" Margin="16,0,16,12">
+                        <TextBlock x:Name="CurrentName" FontSize="14" FontWeight="SemiBold" Foreground="White" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock x:Name="CurrentFolder" FontSize="11.5" Foreground="#CCFFFFFF" TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Button>
+
+        <DockPanel Margin="2,12,0,8">
+            <StackPanel x:Name="Fits" DockPanel.Dock="Right" Orientation="Horizontal"/>
+            <TextBlock x:Name="CountText" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+        </DockPanel>
+
+        <Border Background="{StaticResource PanelTileBrush}" CornerRadius="{StaticResource TileRadius}" Padding="5" Height="196">
+            <ListBox x:Name="ThumbList" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource PlainRow}"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled" VirtualizingPanel.ScrollUnit="Pixel"
+                     VirtualizingPanel.VirtualizationMode="Recycling"/>
+        </Border>
+
+        <TextBlock x:Name="StatusText" FontSize="11.5" Foreground="{StaticResource TextBrush}" TextWrapping="Wrap" Margin="4,8,0,0" Visibility="Collapsed"/>
+    </StackPanel>
+</UserControl>

@@ -1,0 +1,26 @@
+<UserControl x:Class="LapDock.Views.Tabs.PowerTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Foreground="{StaticResource TextBrush}">
+    <UserControl.Resources>
+        <!-- The circle is the button: no chrome. A keyboard focus ring is drawn by the tab itself. -->
+        <Style x:Key="Plain" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button"><ContentPresenter/></ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <StackPanel>
+        <Border Background="{StaticResource PanelTileBrush}" CornerRadius="{StaticResource TileRadius}" Padding="10,24,10,20">
+            <UniformGrid x:Name="Buttons" Columns="4"/>
+        </Border>
+        <TextBlock x:Name="StatusText" FontSize="12" Foreground="{StaticResource MutedBrush}" TextAlignment="Center"
+                   TextWrapping="Wrap" Margin="12,12,12,0"/>
+    </StackPanel>
+</UserControl>
