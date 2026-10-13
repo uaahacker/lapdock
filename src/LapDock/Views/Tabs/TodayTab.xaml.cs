@@ -13,11 +13,14 @@ namespace LapDock.Views.Tabs;
 
 /// <summary>
 /// Today: big time + date range + weather, this week's strip with event dots and the next few
-/// events, a quick ring timer (1/5/10/25 min) and to-dos with "@18:30" reminders.
+/// events, a quick ring timer (1/5/10/25 min) or focus sessions, and to-dos with "@18:30" reminders.
 /// </summary>
 public partial class TodayTab : UserControl
 {
     private static readonly int[] PresetMinutes = { 1, 5, 10, 25 };
+    private static readonly TimeSpan FocusLength = TimeSpan.FromMinutes(25), BreakLength = TimeSpan.FromMinutes(5);
+
+    private enum Phase { Focus, Break }
 
     private readonly DispatcherTimer _clock = new();
     private readonly DispatcherTimer _ticker = new() { Interval = TimeSpan.FromMilliseconds(200) };
@@ -29,10 +32,24 @@ public partial class TodayTab : UserControl
 
     // Timer: counts down to an end time, so a late tick can never make it drift.
     private TimeSpan _total = TimeSpan.FromMinutes(1), _left = TimeSpan.FromMinutes(1);
+    private TimeSpan _timerTotal = TimeSpan.FromMinutes(1); // the timer's preset, kept while in focus mode
     private DateTime? _endsAtUtc;
+    private bool _focusMode;
+    private Phase _phase = Phase.Focus;
 
     /// <summary>Timer finished or reminder due: (title, detail). The notch shows it and raises a Windows notification.</summary>
     public event Action<string, string>? Alert;
+
+    /// <summary>A countdown started, paused, finished or changed phase: the collapsed notch shows it live.</summary>
+    public event Action? CountdownChanged;
+
+    /// <summary>What's counting down right now, for the collapsed notch (null = nothing running).</summary>
+    public (string Icon, string Label, TimeSpan Left, bool Accent)? Countdown => _endsAtUtc is { } end
+        ? (_focusMode ? "focus" : "timer", !_focusMode ? "Timer" : _phase == Phase.Focus ? "Focus" : "Break", end - DateTime.UtcNow, _phase == Phase.Focus)
+        : null;
+
+    /// <summary>In a focus session (not on a break): notifications wait.</summary>
+    public bool Focusing => _focusMode && _phase == Phase.Focus && _endsAtUtc is not null;
 
     public TodayTab()
     {
@@ -178,8 +195,9 @@ public partial class TodayTab : UserControl
             pill.Click += (_, _) =>
             {
                 StopTimer();
-                _total = _left = TimeSpan.FromMinutes(minutes);
+                _total = _left = _timerTotal = TimeSpan.FromMinutes(minutes);
                 UpdateTimer();
+                CountdownChanged?.Invoke();
             };
             Presets.Children.Add(pill);
         }
@@ -198,14 +216,57 @@ public partial class TodayTab : UserControl
             _ticker.Start();
         }
         UpdateTimer();
+        CountdownChanged?.Invoke();
     }
 
     private void Reset_Click(object sender, RoutedEventArgs e)
     {
         StopTimer();
+        if (_focusMode)
+        {
+            _phase = Phase.Focus;
+            _total = FocusLength;
+        }
         _left = _total;
         UpdateTimer();
+        CountdownChanged?.Invoke();
     }
+
+    private void TimerMode_Click(object sender, RoutedEventArgs e) => SetFocusMode(false);
+    private void FocusMode_Click(object sender, RoutedEventArgs e) => SetFocusMode(true);
+
+    private void SetFocusMode(bool focus)
+    {
+        if (focus == _focusMode) return;
+        StopTimer();
+        _focusMode = focus;
+        _phase = Phase.Focus;
+        _total = _left = focus ? FocusLength : _timerTotal;
+        UpdateTimer();
+        CountdownChanged?.Invoke();
+    }
+
+    /// <summary>Windows' own Do not disturb has no public switch: open the page where it is.</summary>
+    private void Dnd_Click(object sender, RoutedEventArgs e) => MainWindow.OpenUri("ms-settings:notifications");
+
+    /// <summary>Focus sessions finished today (the count starts over each day).</summary>
+    private int SessionsToday => _settings is { } s && s.FocusDay == DateTime.Today.ToString("yyyy-MM-dd") ? s.FocusSessions : 0;
+
+    private int CountSession()
+    {
+        if (_settings is null) return 1;
+        var today = DateTime.Today.ToString("yyyy-MM-dd");
+        if (_settings.FocusDay != today)
+        {
+            _settings.FocusDay = today;
+            _settings.FocusSessions = 0;
+        }
+        _settings.FocusSessions++;
+        SettingsService.Save(_settings);
+        return _settings.FocusSessions;
+    }
+
+    private static string Sessions(int n) => n == 1 ? "1 session" : $"{n} sessions";
 
     private void StopTimer()
     {
@@ -220,8 +281,27 @@ public partial class TodayTab : UserControl
         if (_left <= TimeSpan.Zero)
         {
             StopTimer();
-            _left = _total;
-            Alert?.Invoke("Timer done", $"{_total.TotalMinutes:0} min timer finished");
+            if (!_focusMode)
+            {
+                _left = _total;
+                Alert?.Invoke("Timer done", $"{_total.TotalMinutes:0} min timer finished");
+            }
+            else if (_phase == Phase.Focus)
+            {
+                int done = CountSession();
+                _phase = Phase.Break; // the break starts on its own
+                _total = _left = BreakLength;
+                _endsAtUtc = DateTime.UtcNow + _left;
+                _ticker.Start();
+                Alert?.Invoke("Focus session done", $"Take a 5-minute break · {Sessions(done)} today");
+            }
+            else
+            {
+                _phase = Phase.Focus;
+                _total = _left = FocusLength;
+                Alert?.Invoke("Break's over", "Start the next focus session when you're ready");
+            }
+            CountdownChanged?.Invoke(); // after the alert: the notch adds what it held back during focus
         }
         UpdateTimer();
     }
@@ -231,9 +311,19 @@ public partial class TodayTab : UserControl
         int seconds = (int)Math.Ceiling(Math.Max(0, _left.TotalSeconds)); // 00:01 until it is really over
         TimerText.Text = $"{seconds / 60:00}:{seconds % 60:00}";
         TimerRing.Progress = _left.TotalSeconds / _total.TotalSeconds;
-        StartButton.Content = _endsAtUtc is not null ? "Pause" : _left < _total ? "Resume" : "Start";
+        bool onBreak = _focusMode && _phase == Phase.Break;
+        TimerRing.RingBrush = (Brush)FindResource(onBreak ? "TextBrush" : "AccentBrush");
+        StartButton.Content = _endsAtUtc is not null ? "Pause" : _left < _total ? "Resume" : _focusMode ? "Focus" : "Start";
         foreach (Button pill in Presets.Children)
             pill.Tag = (string)pill.Content == $"{_total.TotalMinutes:0}m" ? "on" : null;
+        TimerModeButton.Tag = _focusMode ? null : "on";
+        FocusModeButton.Tag = _focusMode ? "on" : null;
+        Presets.Visibility = _focusMode ? Visibility.Collapsed : Visibility.Visible;
+        FocusInfo.Visibility = _focusMode ? Visibility.Visible : Visibility.Collapsed;
+        PhaseText.Visibility = _focusMode ? Visibility.Visible : Visibility.Collapsed;
+        PhaseText.Text = onBreak ? "break" : "focus";
+        int sessions = SessionsToday;
+        FocusCount.Text = sessions == 0 ? "25 min focus · 5 min break" : $"{Sessions(sessions)} today · {sessions * 25} min";
     }
 
     // ----------------------------------------------------------------- to-dos

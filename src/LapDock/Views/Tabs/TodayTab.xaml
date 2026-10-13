@@ -82,14 +82,27 @@
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
 
-            <!-- Quick timer -->
+            <!-- Quick timer, or focus sessions (25 min focus, 5 min break) -->
             <Border Style="{StaticResource TodayCard}" Margin="0,0,10,0">
                 <StackPanel>
-                    <controls:Ring x:Name="TimerRing" Width="112" Height="112" StrokeWidth="7" Progress="1"
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,-3,0,8">
+                        <Button x:Name="TimerModeButton" Content="Timer" Style="{StaticResource OptionPill}" Padding="11,3" Margin="0,0,4,0" Click="TimerMode_Click"/>
+                        <Button x:Name="FocusModeButton" Content="Focus" Style="{StaticResource OptionPill}" Padding="11,3" Click="FocusMode_Click"
+                                ToolTip="25 minutes of focus, then a 5-minute break. LapDock holds back notifications while you focus."/>
+                    </StackPanel>
+                    <controls:Ring x:Name="TimerRing" Width="100" Height="100" StrokeWidth="7" Progress="1"
                                    RingBrush="{StaticResource AccentBrush}" HorizontalAlignment="Center">
-                        <TextBlock x:Name="TimerText" Style="{StaticResource BigNumber}" FontSize="26"/>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock x:Name="TimerText" Style="{StaticResource BigNumber}" FontSize="24" HorizontalAlignment="Center"/>
+                            <TextBlock x:Name="PhaseText" FontSize="10.5" Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Center" Visibility="Collapsed"/>
+                        </StackPanel>
                     </controls:Ring>
                     <StackPanel x:Name="Presets" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,10,0,6"/>
+                    <StackPanel x:Name="FocusInfo" Margin="0,8,0,6" Visibility="Collapsed">
+                        <TextBlock x:Name="FocusCount" FontSize="11.5" Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Center"/>
+                        <Button Content="Windows Do not disturb…" Style="{StaticResource TextLink}" HorizontalAlignment="Center" Margin="0,1,0,0"
+                                ToolTip="Silence Windows' own notification banners too (Settings → Notifications)" Click="Dnd_Click"/>
+                    </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                         <Button x:Name="StartButton" Content="Start" Style="{StaticResource PrimaryPill}" Padding="14,5" FontSize="12" Click="StartPause_Click"/>
                         <Button Content="Reset" Style="{StaticResource PillButton}" Background="{StaticResource PanelFillBrush}" Padding="14,5" FontSize="12" Margin="6,0,0,0" Click="Reset_Click"/>
