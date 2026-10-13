@@ -21,3 +21,8 @@ project.fragment.lock.json
 Thumbs.db
 .idea/
 *.swp
+# Local build tools and verification artifacts
+.tools/
+artifacts/
+# Source zips for moving the project to another computer
+release/

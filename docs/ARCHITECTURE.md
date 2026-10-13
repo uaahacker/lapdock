@@ -42,27 +42,70 @@ card while playback is active.
 
 ## Music
 
-v0.1 uses Windows **media keys** (`VK_MEDIA_PLAY_PAUSE`, `VK_MEDIA_NEXT_TRACK`,
-`VK_MEDIA_PREV_TRACK`, volume keys). Every serious player honours them —
-Spotify, YouTube in any browser, VLC, Windows Media Player — so the controls
-work everywhere with zero per-app integration.
+`NowPlayingService` reads **SMTC**
+(`GlobalSystemMediaTransportControlsSessionManager`): track title, artist,
+album, artwork, timeline and play state, and drives play/pause/skip/seek on
+the current session. With no session (or SMTC unavailable) the transport
+buttons fall back to Windows **media keys**; volume always uses media keys.
 
-The proper upgrade (already scoped in ROADMAP) is **SMTC**
-(`GlobalSystemMediaTransportControlsSessionManager`) for real track title,
-artist, artwork and play state.
+## Dock
+
+Pins are `Label|Target` strings in settings. `ShellIconService` asks the
+Windows shell (`SHCreateItemFromParsingName` + `IShellItemImageFactory`) for
+each target's real high-res icon and display name — exe/lnk paths, bare exe
+names on PATH, and `shell:AppsFolder\<AUMID>` store apps. The HBITMAP is copied
+with `GetDIBits` into a premultiplied WPF bitmap (WPF's own HBITMAP import
+drops alpha). No icon → an iOS-style squircle with the label's initial.
+
+Hover magnification scales the icon (1.3×, neighbours 1.1×) in place, sized
+so icons never overlap or leave the pill; launching hops it downward, a
+failed launch shakes it. Drop files/shortcuts to pin, right-click to remove.
 
 ## Timers
 
-`MainViewModel` owns one 250 ms ticker driving: wall clock, Pomodoro state
+`MainViewModel` owns one 200 ms ticker driving: wall clock, Pomodoro state
 machine (Focus 25 → Break 5 → Focus…), a free countdown and a stopwatch.
+Each tick advances timers by the *real* elapsed time (`Stopwatch`), so a busy
+UI thread delaying ticks can't make them drift.
 All state is plain `INotifyPropertyChanged`; the XAML binds and stays dumb.
 
-## Screens
+## Screens / the notch
 
-`ScreenService` lists `Screen.AllScreens`, and `MoveToScreen` positions the
-borderless window exactly over the chosen display's bounds and maximises it
-there. The choice persists in settings, so LapDock re-opens on the laptop
-panel after a reboot.
+The window is a fixed-size, fully transparent layered window
+(`AllowsTransparency`), topmost, `WS_EX_TOOLWINDOW` (no taskbar, no Alt+Tab).
+Transparent pixels are click-through, so only the pill itself takes the mouse.
+`ScreenService.PlaceTopCenter` pins it flush to the top-centre of the chosen
+display with `SetWindowPos` in physical pixels: it first lands on the display
+(so a scaling change fires `WM_DPICHANGED` and rescales the window), then
+reads the real width and centres.
+
+Hover opens the pill (width/height animation with a slight spring, contents
+cross-fade); leaving starts a 350 ms grace timer before closing. While any
+right-click menu is open the timer keeps re-checking instead of closing.
+
+The chosen display persists in settings; on first run LapDock picks the first
+non-primary display (the laptop panel when an external monitor is main).
+`SystemEvents.DisplaySettingsChanged` puts it back when monitors come and go.
+
+## System widgets
+
+One service per integration in `Services/`, each optional (settings flags), started in
+isolation (a failure hides that widget only), and **event-driven — nothing polls**:
+
+| Widget | Mechanism | Change signal |
+| --- | --- | --- |
+| Battery | WinRT `Windows.System.Power.PowerManager` (fallback: WinForms `PowerStatus`) | `RemainingChargePercentChanged`, `BatteryStatusChanged`, `PowerSupplyStatusChanged` |
+| Mic / camera | `HKCU\…\CapabilityAccessManager\ConsentStore\{microphone,webcam}` — per-app `LastUsedTimeStart/Stop`; Stop = 0 means in use. Desktop apps are only trusted while their exe runs (a crash can leave Stop = 0). Names: exe `FileDescription` / package `DisplayName` | `RegNotifyChangeKeyValue` on a background thread |
+| Media | SMTC `GlobalSystemMediaTransportControlsSessionManager` (`NowPlayingService`) | session/media/playback/timeline events; position ticks only while playing |
+| Volume | Core Audio `IMMDeviceEnumerator` → default render endpoint → `IAudioEndpointVolume` | `IAudioEndpointVolumeCallback` (own changes tagged with an event-context GUID), `IMMNotificationClient` for default-device changes |
+| Screenshot | Rectangle/Window: `ms-screenclip:?clippingMode=…` (legacy but honoured; the new `ms-screenclip://capture` needs an MSIX package). Full screen: Win+PrintScreen. Open: Snipping Tool AUMID | `FileSystemWatcher` on the Screenshots known folder |
+| Wallpaper | shell `IDesktopWallpaper` (get/set on all displays, fit style); thumbnails decoded small off-thread, cached | `SystemEvents.UserPreferenceChanged` (Desktop) |
+
+The notch has three states sharing one pill — **Peek**, **Activity** (a few seconds,
+de-duplicated, skipped while expanded) and **Expanded**. `ResizePill` runs the pending
+layout pass, then animates the pill only when the target size actually changes (each
+animation repaints the whole layered window). The only free-running animation is the
+music pulse, and only while something plays; the clock wakes once a minute.
 
 ## Settings
 

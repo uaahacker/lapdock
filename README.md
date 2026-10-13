@@ -6,27 +6,40 @@ When you plug an external monitor into your laptop, the external screen becomes
 your main workspace — and the laptop screen usually sits there wasted, showing a
 duplicate desktop or a random window.
 
-**LapDock lives on that laptop screen.** It is a clean, fullscreen companion
-display for Windows with:
+**LapDock lives on that laptop screen** — as a notch. A small black pill sits
+flush with the top-centre of the display, like a phone's Dynamic Island.
+**Hover it** and it springs open; move away and it closes again. No window, no
+resizing, no fullscreen, nothing in the taskbar or Alt+Tab, and the empty
+space around it never blocks your clicks.
 
-- 🧑‍🚀 **Nova — an animated companion head** that *watches your cursor* in real
-  time (even when the cursor is on your other monitor). Nova blinks, tilts,
-  follows you around, gets sleepy when you stop moving, dances when music
-  plays, and reacts when you click it.
-- 🎵 **Music controls** — previous / play-pause / next + volume, working with
-  Spotify, YouTube, VLC and anything else that listens to Windows media keys.
-  Animated equalizer bars while music plays.
-- ⏱️ **Focus timer suite** — big clock, Pomodoro (25/5), countdown timer and
-  stopwatch in one place.
-- 📊 **System vitals** — live CPU, RAM and battery with clean progress bars.
-- 🚀 **App dock** — a macOS-style bottom dock with hover magnification for your
-  pinned apps and Windows tools (Explorer, Terminal, Settings, Snipping Tool,
-  Task Manager…).
-- ⚡ **Quick actions** — lock PC, screenshot, focus/do-not-disturb settings,
-  display settings, and one-tap links to the controls you always hunt for.
-- 🌤️ **Weather** — current conditions for your city via Open-Meteo (free, no
-  API key).
-- 📝 **Scratch notes** — a tiny notepad that saves automatically.
+**Collapsed**, it shows what matters right now: the time (or the song that's
+playing, with a green pulse), 🟢 camera / 🟠 microphone privacy dots, and the
+battery. **Short live messages** appear for a few seconds when something
+happens — *Charging · 54%*, *Low battery*, *Microphone in use · Discord*,
+*Volume 72%*, *Screenshot saved*, *Now playing*, *Wallpaper changed*.
+
+**Expanded:**
+
+- 🚀 **Dock** — your apps' *real* icons, gentle magnification, launch bounce.
+  Drag an app/shortcut onto the notch to pin it (a drop slot shows where);
+  right-click an icon → *Remove from dock*.
+- 🎵 **Now Playing** — artwork, title, artist, seek bar, previous/play/next
+  for whatever Windows' media session reports (Spotify, browsers, Netflix…).
+- 📸 **Screenshot** — Rectangle, Window, Full screen, or open Snipping Tool.
+- 🔊 **Volume** — system volume slider and mute.
+- 🖼️ **Wallpaper** — preview, *Change…* (file picker), *Next*, recent
+  wallpapers, and Fill / Fit / Stretch / Tile / Center / Span.
+- 🔋 **Battery** and 🛡️ **Privacy** — tap the chips in the top row for details
+  (which apps are using the mic/camera).
+- 🖥️ **Right-click the notch** → *Move to next display* or *Quit LapDock*.
+
+Every widget can be switched off in `%AppData%\LapDock\settings.json`
+(`ShowClock`, `ShowBattery`, `MicrophoneIndicator`, `CameraIndicator`,
+`MediaControls`, `DynamicNotifications`) until the settings panel lands.
+
+> The earlier dashboard widgets (Nova companion, Pomodoro/timers, weather,
+> notes) are parked; their code is kept in `Controls/`, `ViewModels/` and
+> `Services/` to bring back into the notch.
 
 ## Why C# + WPF (.NET 8)?
 
@@ -51,12 +64,10 @@ Or open `LapDock.sln` in Visual Studio 2022 and press F5.
 
 1. Plug in your external monitor and set it as your **main display**
    (Settings → System → Display).
-2. Start LapDock. In its top bar, pick your **laptop display** from the screen
-   picker — LapDock goes fullscreen there and stays out of your way.
-3. Work on the big screen. Nova watches your cursor from the laptop screen,
-   your music, timer and stats are always one glance down.
-
-Handy keys: `F11` toggle fullscreen · `Esc` exit fullscreen · click Nova to poke it.
+2. Start LapDock. The notch appears at the top of your **laptop display**
+   (the non-main one). Right-click it → *Move to next display* to change
+   screens; it remembers your choice, even across unplug/replug.
+3. Hover the notch whenever you want your apps.
 
 ## Project layout
 
@@ -65,14 +76,23 @@ LapDock.sln
 src/LapDock/
   LapDock.csproj
   App.xaml / App.xaml.cs          app entry + shared styles (glass cards, dock buttons)
-  MainWindow.xaml / .xaml.cs      the dock shell: top bar, widget grid, bottom dock
+  MainWindow.xaml / .xaml.cs      the notch shell: peek / activity / expanded states, hover, placement
+  MainWindow.Dock.cs              pinned apps: icons, magnify, launch, drag-to-pin, unpin
+  MainWindow.Widgets.cs           clock, battery, privacy, media, volume, screenshot, wallpaper, live messages
   Controls/
     CompanionHead.xaml(.cs)       Nova: eye tracking, blinking, tilt, moods
   Services/
     CursorService.cs              global cursor position (Win32 GetCursorPos, 60 fps poll)
     MediaService.cs               media keys + volume (works with every player)
     SystemStatsService.cs         CPU / RAM / battery
-    ScreenService.cs              enumerate displays, move window to a display
+    NowPlayingService.cs          SMTC: title, artist, artwork, seek, play state
+    BatteryService.cs             battery %, charging, low/critical/full (WinRT PowerManager events)
+    PrivacyService.cs             mic/camera in use + which app (consent store, registry change notify)
+    AudioService.cs               system volume + mute (Core Audio, change callbacks)
+    ScreenshotService.cs          Snipping Tool capture modes, Win+PrtScn, "screenshot saved" watcher
+    WallpaperService.cs           wallpaper get/set/fit/next + cached thumbnails (IDesktopWallpaper)
+    ShellIconService.cs           real app icons + names for dock pins (Windows shell)
+    ScreenService.cs              pick the display, pin the notch to its top-centre
     SettingsService.cs            %AppData%/LapDock/settings.json
     WeatherService.cs             Open-Meteo, no key needed
   ViewModels/
@@ -86,10 +106,10 @@ docs/
 
 ## Status
 
-**v0.1 starter — working skeleton, all headline features live in basic form.**
-See [docs/ROADMAP.md](docs/ROADMAP.md) for what is next: real Now Playing via
-Windows SMTC (song title/artist/artwork), per-screen auto-launch, widgets
-SDK, themes, tray mode, and more Nova moods/animations.
+**v0.3 — the notch is a system utility** (battery, privacy, media, volume,
+screenshots, wallpaper, live messages). See [docs/ROADMAP.md](docs/ROADMAP.md)
+for everything done so far, how it was checked, known limits, and suggestions
+for what could come next.
 
 ## License
 
