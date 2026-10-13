@@ -12,9 +12,11 @@ using Microsoft.Win32;
 namespace LapDock;
 
 /// <summary>
-/// System widgets: clock, battery, privacy (mic/camera), now playing, volume, screenshot —
-/// plus the short-lived "activity" messages they raise. Every widget is optional
-/// (AppSettings flags) and starts in isolation, so one failing never takes the notch down.
+/// System widgets: clock, battery (with history and health), privacy (mic/camera), now playing, volume,
+/// screenshot, downloads, USB devices, sound output — plus what they show: the short-lived "activity"
+/// messages, other apps' notifications, and live activities in the collapsed pill (a call, a timer or
+/// focus session, a download). Every widget is optional (AppSettings flags) and starts in isolation,
+/// so one failing never takes the notch down.
 /// </summary>
 public partial class MainWindow
 {
@@ -23,17 +25,28 @@ public partial class MainWindow
     private PrivacyService? _privacy;
     private AudioService? _audio;
     private ScreenshotService? _screenshots;
+    private DownloadWatcher? _downloads;
+    private UsbWatcher? _usb;
+    private AppNotificationService? _notices;
 
     private readonly DispatcherTimer _clockTimer = new();
-    private readonly DispatcherTimer _eqTimer = new() { Interval = TimeSpan.FromMilliseconds(110) };
+    private readonly DispatcherTimer _eqTimer = new() { Interval = TimeSpan.FromMilliseconds(66) }; // ~15 frames a second
     private readonly DispatcherTimer _activityTimer = new() { Interval = TimeSpan.FromSeconds(2.8) };
     private readonly DispatcherTimer _trackTimer = new() { Interval = TimeSpan.FromMilliseconds(700) };
+    private readonly DispatcherTimer _liveTimer = new() { Interval = TimeSpan.FromSeconds(1) };       // a live activity's clock
+    private readonly DispatcherTimer _batteryLogTimer = new() { Interval = TimeSpan.FromMinutes(10) }; // the chart's steady points
 
     private string? _panel;            // open chip panel: snip | battery | privacy
     private string? _lastTrack;        // "title|artist" last announced
     private (string Text, DateTime At) _lastNotice;
     private bool _mediaReady;
     private int _eqTick;
+    private readonly double[] _eqGain = { 1, .8, 1, .8, 1 };
+    private readonly Random _random = new();
+    private Action? _activityClick;     // the shown activity opens something when clicked
+    private string? _callApp;           // an app using the microphone for a call
+    private DateTime _callSince;
+    private int _heldNotices;           // app notifications that arrived during a focus session
 
     private Brush Res(string key) => (Brush)FindResource(key);
 
@@ -41,6 +54,8 @@ public partial class MainWindow
     {
         _activityTimer.Tick += (_, _) => { _activityTimer.Stop(); if (_mode == Mode.Activity) SetMode(Mode.Peek); };
         _eqTimer.Tick += (_, _) => AnimateEq();
+        _liveTimer.Tick += (_, _) => { if (_mode == Mode.Peek) RefreshPeek(); };
+        _batteryLogTimer.Tick += (_, _) => { if (_battery is not null) BatteryHistory.Record(_battery.Current); };
         _trackTimer.Tick += (_, _) => { _trackTimer.Stop(); AnnounceTrack(); };
         _clockTimer.Tick += (_, _) => UpdateClock();
         UpdateClock();
@@ -48,11 +63,22 @@ public partial class MainWindow
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
 
         if (_settings.ShowBattery)
-            Try(() => { _battery = new BatteryService(Dispatcher); _battery.Changed += OnBatteryChanged; _battery.Start(); });
+            Try(() =>
+            {
+                _battery = new BatteryService(Dispatcher);
+                _battery.Changed += OnBatteryChanged;
+                _battery.Start();
+                BatteryHistory.Prune();
+                BatteryHistory.Record(_battery.Current);
+                _batteryLogTimer.Start();
+            });
         if (_settings.MicrophoneIndicator || _settings.CameraIndicator)
-            Try(() => { _privacy = new PrivacyService(Dispatcher); _privacy.Changed += OnPrivacyChanged; _privacy.Start(); });
-        Try(() => { _audio = new AudioService(Dispatcher); _audio.Changed += OnVolumeChanged; _audio.Start(); });
+            Try(() => { _privacy = new PrivacyService(Dispatcher); _privacy.Changed += OnPrivacyChanged; _privacy.Start(); UpdateCall(_privacy.Current); });
+        Try(() => { _audio = new AudioService(Dispatcher); _audio.Changed += OnVolumeChanged; _audio.OutputChanged += OnOutputChanged; _audio.Start(); });
         Try(() => { _screenshots = new ScreenshotService(Dispatcher); _screenshots.Saved += OnScreenshotSaved; _screenshots.Start(); });
+        Try(() => { _downloads = new DownloadWatcher(Dispatcher); _downloads.Changed += RefreshPeek; _downloads.Completed += OnDownloaded; _downloads.Start(); });
+        Try(() => { _usb = new UsbWatcher(Dispatcher); _usb.Connected += OnUsbConnected; _usb.Start(); });
+        await StartNoticesAsync();
 
         if (_settings.MediaControls)
         {
@@ -72,13 +98,16 @@ public partial class MainWindow
     private void StopWidgets()
     {
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged; // static event: must unhook
-        foreach (var t in new[] { _clockTimer, _eqTimer, _activityTimer, _trackTimer }) t.Stop();
+        foreach (var t in new[] { _clockTimer, _eqTimer, _activityTimer, _trackTimer, _liveTimer, _batteryLogTimer }) t.Stop();
         _nowPlaying.PropertyChanged -= OnNowPlayingChanged;
         _nowPlaying.Dispose();
         _battery?.Dispose();
         _privacy?.Dispose();
         _audio?.Dispose();
         _screenshots?.Dispose();
+        _downloads?.Dispose();
+        _usb?.Dispose();
+        _notices?.Dispose();
     }
 
     private void RefreshAll()
@@ -90,15 +119,27 @@ public partial class MainWindow
     // ------------------------------------------------------------------ peek
     private void RefreshPeek()
     {
-        bool media = _settings.MediaControls && _nowPlaying.IsPlaying;
+        var live = Live();
+        bool media = _settings.MediaControls && _nowPlaying.IsPlaying && live is null;
+        PeekLive.Visibility = Show(live is not null);
+        PeekLiveValue.Visibility = Show(live is not null);
+        if (live is { } l)
+        {
+            PeekLiveIcon.Icon = l.Icon;
+            PeekLiveIcon.Foreground = l.Tint;
+            PeekLiveLabel.Text = l.Label;
+            PeekLiveValue.Text = l.Value;
+            PeekLiveValue.Foreground = l.Tint;
+        }
+        _liveTimer.IsEnabled = live is not null && !Away;
         PeekArtBrush.ImageSource = _nowPlaying.Artwork;
         PeekArt.Visibility = Show(media && _nowPlaying.Artwork is not null);
         PeekTitle.Text = _nowPlaying.Title;
         PeekTitle.Visibility = Show(media);
         PeekEq.Visibility = Show(media);
-        _eqTimer.IsEnabled = media && !Quiet; // the only animation that runs on its own: only while music plays, never over fullscreen apps
+        _eqTimer.IsEnabled = media && !Away; // the only animation that runs on its own: only while music plays, never over fullscreen apps
         UpdateNova();
-        PeekTime.Visibility = Show(!media && _settings.ShowClock);
+        PeekTime.Visibility = Show(!media && live is null && _settings.ShowClock);
 
         var p = _privacy?.Current ?? PrivacyState.None;
         PeekMicDot.Visibility = Show(_settings.MicrophoneIndicator && p.MicrophoneInUse);
@@ -127,12 +168,60 @@ public partial class MainWindow
         if (_mode == Mode.Peek) ResizePill();
     }
 
+    /// <summary>
+    /// The music bars follow what's actually playing: the output's left/right level, each bar with its own
+    /// slowly wandering gain so they read like a spectrum — quick to jump, slower to fall, flat in silence.
+    /// </summary>
     private void AnimateEq()
     {
         _eqTick++;
-        var bars = new[] { Eq1, Eq2, Eq3, Eq4 };
-        for (int i = 0; i < bars.Length; i++)
-            bars[i].Height = 3 + 9 * Math.Abs(Math.Sin(_eqTick * .45 + i * .9));
+        var bars = PeekEq.Levels;
+        if (_audio is not { HasMeter: true } audio)
+        {
+            for (int i = 0; i < bars.Length; i++) // no level meter on this device: a gentle wave
+                bars[i] = .85 * Math.Abs(Math.Sin(_eqTick * .25 + i * .9));
+        }
+        else
+        {
+            var (left, right) = audio.Levels;
+            for (int i = 0; i < bars.Length; i++)
+            {
+                if (_eqTick % 5 == i) _eqGain[i] = .55 + .45 * _random.NextDouble();
+                double level = (i < 2 ? left : i > 2 ? right : (left + right) / 2) * _eqGain[i];
+                double target = Math.Min(1, Math.Sqrt(level) * 1.2);
+                bars[i] += (target - bars[i]) * (target > bars[i] ? .75 : .3);
+            }
+        }
+        PeekEq.InvalidateVisual();
+    }
+
+    // ------------------------------------------------------------ live
+    /// <summary>What the collapsed pill shows instead of the clock: a call, then a timer or focus session, then a download.</summary>
+    private (string Icon, string Label, string Value, Brush Tint)? Live()
+    {
+        if (_callApp is { } app) return ("phone", app, Elapsed(DateTime.UtcNow - _callSince), Res("AccentBrush"));
+        if (TodayPage.Countdown is { } c) return (c.Icon, c.Label, Elapsed(c.Left), c.Accent ? Res("AccentBrush") : Res("TextBrush"));
+        if (_downloads?.Current is { } d)
+            return ("download", d.Count > 1 ? $"{d.Name} +{d.Count - 1}" : d.Name, DownloadWatcher.FormatBytes(d.Bytes), Res("TextBrush"));
+        return null;
+    }
+
+    /// <summary>"04:59", or "1:02:07" past an hour.</summary>
+    public static string Elapsed(TimeSpan t)
+    {
+        int s = (int)Math.Ceiling(Math.Max(0, t.TotalSeconds));
+        return s >= 3600 ? $"{s / 3600}:{s / 60 % 60:00}:{s % 60:00}" : $"{s / 60:00}:{s % 60:00}";
+    }
+
+    /// <summary>A timer or focus session started, paused or ended; a focus session's held-back notifications are summed up.</summary>
+    private void OnCountdownChanged()
+    {
+        RefreshPeek();
+        if (TodayPage.Focusing || _heldNotices == 0) return;
+        int held = _heldNotices;
+        _heldNotices = 0;
+        Notify("app", "bell", held == 1 ? "1 notification while you focused" : $"{held} notifications while you focused",
+            "Click to see them", seconds: 6, caption: "Focus", click: () => OpenUri("ms-actioncenter:"));
     }
 
     // -------------------------------------------------------------- expanded
@@ -193,26 +282,46 @@ public partial class MainWindow
     /// A few seconds of "Charging 54%" in the collapsed notch. Skipped while expanded (the same
     /// information is on screen). Repeats of the same key update in place instead of re-animating.
     /// </summary>
+    /// <param name="click">Makes it a button: hovering keeps it up, clicking runs this (opens the app, the folder…).</param>
+    /// <param name="caption">A small line above the title (an app notification's app name).</param>
+    /// <param name="appIcon">An app's own icon, shown as is instead of the round glyph.</param>
     private void Notify(string key, string glyph, string title, string detail, double? progress = null,
-        Brush? accent = null, ImageSource? art = null, double seconds = 2.8)
+        Brush? accent = null, ImageSource? art = null, double seconds = 2.8, Action? click = null, string? caption = null,
+        ImageSource? appIcon = null)
     {
-        if (!_settings.DynamicNotifications || _mode == Mode.Expanded || Quiet) return; // nothing pops up over a fullscreen app
+        bool enabled = key == "app" ? _settings.AppNotifications : _settings.DynamicNotifications;
+        if (!enabled || _mode == Mode.Expanded || Away) return; // nothing pops up over a fullscreen app or a covering window
         var text = title + "|" + detail;
         if (_mode != Mode.Activity && _lastNotice.Text == text && DateTime.UtcNow - _lastNotice.At < TimeSpan.FromSeconds(5)) return;
         _lastNotice = (text, DateTime.UtcNow);
 
         // glyph: one of LapDock's icon names ("volume"), or a single Segoe glyph for what the pack doesn't draw.
-        bool named = glyph.Length > 1;
+        bool named = glyph.Length > 1, plain = art is null && appIcon is null;
         ActivityGlyph.Text = named ? "" : glyph;
         ActivityGlyph.Foreground = accent ?? Res("TextBrush");
-        ActivityGlyph.Visibility = Show(art is null && !named);
+        ActivityGlyph.Visibility = Show(plain && !named);
         ActivityIcon2.Icon = named ? glyph : null;
         ActivityIcon2.Foreground = accent ?? Res("TextBrush");
-        ActivityIcon2.Visibility = Show(art is null && named);
-        ActivityIcon.Background = art is null ? Res("FillBrush") : new ImageBrush(art) { Stretch = Stretch.UniformToFill };
+        ActivityIcon2.Visibility = Show(plain && named);
+        ActivityAppIcon.Source = appIcon;
+        ActivityAppIcon.Visibility = Show(appIcon is not null);
+        ActivityIcon.Background = appIcon is not null ? Brushes.Transparent
+            : art is null ? Res("FillBrush") : new ImageBrush(art) { Stretch = Stretch.UniformToFill };
+        ActivityIcon.CornerRadius = new CornerRadius(appIcon is not null ? 9 : 17);
+        // An app's notification: its name on top, then the sender / subject, then up to two lines of message.
+        bool message = caption is not null;
+        ActivityCaption.Text = caption ?? "";
+        ActivityCaption.Visibility = Show(message);
+        ActivityText.Margin = message ? new Thickness(0, 9, 22, 11) : new Thickness(0, 4, 20, 0);
+        ActivityDetail.TextWrapping = message ? TextWrapping.Wrap : TextWrapping.NoWrap;
+        ActivityDetail.MaxWidth = message ? 300 : 230;
+        ActivityDetail.MaxHeight = message ? 32 : double.PositiveInfinity;
         ActivityTitle.Text = title;
         ActivityDetail.Text = detail;
         ActivityDetail.Visibility = Show(!string.IsNullOrEmpty(detail));
+        _activityClick = click;
+        Activity.IsHitTestVisible = click is not null;
+        Activity.Cursor = click is null ? null : Cursors.Hand;
         ActivityBar.Visibility = Show(progress is not null);
         ActivityBar.Value = progress ?? 0;
         ActivityBar.Foreground = accent ?? Res("TextBrush");
@@ -224,9 +333,91 @@ public partial class MainWindow
         else SetMode(Mode.Activity);
     }
 
+    private void Activity_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (_activityClick is not { } click) return;
+        _activityClick = null;
+        SetMode(Mode.Peek);
+        click();
+    }
+
+    // ------------------------------------------------------- notifications
+    /// <summary>Other apps' notifications (Settings: "Notifications from apps"); starts once, when switched on.</summary>
+    private async Task StartNoticesAsync()
+    {
+        if (!_settings.AppNotifications || _notices is not null) return;
+        _notices = new AppNotificationService();
+        _notices.Arrived += OnAppNotice;
+        if (!await _notices.StartAsync())
+        {
+            _notices.Dispose();
+            _notices = null;
+        }
+    }
+
+    private void OnAppNotice(AppNotice n)
+    {
+        if (TodayPage.Focusing)
+        {
+            _heldNotices += n.Count; // shown as a count when the session ends
+            return;
+        }
+        var app = string.IsNullOrEmpty(n.AppId) ? null : @"shell:AppsFolder\" + n.AppId;
+        Notify("app", "bell", n.Title, n.Body, seconds: 6,
+            caption: n.Count > 1 ? $"{n.App} · {n.Count} new" : n.App,
+            appIcon: app is null ? null : ShellIconService.Get(app, 64).Icon,
+            click: app is null ? null : () => OpenUri(app));
+    }
+
+    // ------------------------------------------------------ downloads, devices
+    private void OnDownloaded(string path) =>
+        Notify("download", "download", "Downloaded", Path.GetFileName(path), accent: Res("AccentBrush"), seconds: 5,
+            click: () => DownloadWatcher.ShowInFolder(path));
+
+    private void OnUsbConnected(string name, DriveInfo? drive)
+    {
+        string detail = "Connected";
+        if (drive is not null)
+        {
+            try
+            {
+                var label = string.IsNullOrWhiteSpace(drive.VolumeLabel) ? "USB drive" : drive.VolumeLabel;
+                detail = $"{label} ({drive.Name.TrimEnd('\\')}) · {DownloadWatcher.FormatBytes(drive.AvailableFreeSpace)} free · click to open";
+            }
+            catch (Exception) { detail = $"Drive {drive.Name.TrimEnd('\\')} · click to open"; }
+        }
+        Notify("usb", "usb", name, detail, accent: Res("AccentBrush"), seconds: drive is null ? 3.5 : 6,
+            click: drive is null ? null : () => OpenUri(drive.RootDirectory.FullName));
+    }
+
+    /// <summary>Windows switched the sound output: AirPods connected, back to the speakers…</summary>
+    private void OnOutputChanged()
+    {
+        if (_audio?.DeviceName is not { } name) return;
+        bool phones = _audio.IsHeadphones;
+        Notify("output", phones ? "headphones" : "volume", AudioService.ShortName(name), phones ? "Connected" : "Sound output",
+            accent: phones ? Res("AccentBrush") : null);
+    }
+
+    // ------------------------------------------------------------------ call
+    /// <summary>Calling apps; a browser using the microphone is most likely a call too (Meet, Teams on the web…).</summary>
+    private static readonly string[] CallApps =
+        { "Teams", "Zoom", "Discord", "WhatsApp", "Skype", "Slack", "Telegram", "Signal", "Webex", "Phone Link", "Messenger", "Viber",
+          "Chrome", "Edge", "Firefox", "Brave", "Opera" };
+
+    public static bool IsCallApp(string app) => CallApps.Any(c => app.Contains(c, StringComparison.OrdinalIgnoreCase));
+
+    private void UpdateCall(PrivacyState p)
+    {
+        var app = _settings.MicrophoneIndicator ? p.Microphone.FirstOrDefault(IsCallApp) : null;
+        if (app is not null && _callApp is null) _callSince = DateTime.UtcNow;
+        _callApp = app;
+    }
+
     // --------------------------------------------------------------- battery
     private void OnBatteryChanged(BatteryInfo old, BatteryInfo now)
     {
+        if (now.Percent != old.Percent || now.PluggedIn != old.PluggedIn) BatteryHistory.Record(now);
         RefreshAll();
         if (!old.Present || !now.Present) return; // first reading, or no battery: nothing to announce
         double level = now.Percent / 100.0;
@@ -259,6 +450,22 @@ public partial class MainWindow
         BatteryStatus.Text = BatteryStatusText(b);
         BatteryBar.Value = b.Percent;
         BatteryBar.Foreground = b.State is BatteryState.Low or BatteryState.Critical ? BatteryBrush(b) : Res("AccentBrush");
+
+        var now = DateTime.Now;
+        var slots = BatteryHistory.Slots(BatteryHistory.Load(now.AddHours(-24)), now);
+        BatteryHistoryChart.Slots = slots;
+        BatteryChartStart.Text = now.AddHours(-24).ToString("t");
+        BatteryChartMiddle.Text = now.AddHours(-12).ToString("t");
+        BatteryChartEmpty.Visibility = Show(slots.Count(s => s is not null) < 3);
+
+        var health = BatteryHistory.Health();
+        BatteryHealthRow.Visibility = Show(health is not null);
+        if (health is not { } h) return;
+        BatteryHealthText.Text = $"{h.Percent:0}%";
+        BatteryHealthText.ToolTip = "How much charge the battery holds now, compared with when it was new";
+        BatteryCapacityText.Text = $"{h.FullWh:0.#} of {h.DesignWh:0.#} Wh";
+        BatteryRateLabel.Text = h.RateW > .05 ? "Charging at" : h.RateW < -.05 ? "Using" : "Power";
+        BatteryRateText.Text = Math.Abs(h.RateW) > .05 ? $"{Math.Abs(h.RateW):0.#} W" : "—";
     }
 
     /// <summary>Segoe Fluent battery glyphs: Battery0–10 at U+EBA0, BatteryCharging0–10 at U+EBAB.</summary>
@@ -293,6 +500,7 @@ public partial class MainWindow
     // --------------------------------------------------------------- privacy
     private void OnPrivacyChanged(PrivacyState old, PrivacyState now)
     {
+        UpdateCall(now);
         RefreshAll();
         if (_settings.MicrophoneIndicator && now.Microphone.Except(old.Microphone).Any())
             Notify("mic", "", "Microphone in use", string.Join(", ", now.Microphone), accent: Res("OrangeBrush"));

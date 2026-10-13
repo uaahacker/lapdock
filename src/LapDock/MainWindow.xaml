@@ -83,7 +83,8 @@
     <!-- The window is fully transparent (and so click-through); only the island is drawn.
          Three states share one black pill: Peek (collapsed), Activity (short-lived event), Expanded (hover). -->
     <Grid x:Name="Island" HorizontalAlignment="Center" VerticalAlignment="Top"
-          MouseEnter="Island_MouseEnter" MouseLeave="Island_MouseLeave">
+          MouseEnter="Island_MouseEnter" MouseLeave="Island_MouseLeave"
+          AllowDrop="True" DragEnter="Island_DragOver" DragOver="Island_DragOver" DragLeave="Island_DragLeave" Drop="Island_Drop">
         <Grid.ContextMenu>
             <ContextMenu>
                 <MenuItem Header="Settings…" Click="Settings_Click"/>
@@ -113,14 +114,17 @@
                 <TextBlock x:Name="PeekTitle" MaxWidth="150" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
                            VerticalAlignment="Center" Visibility="Collapsed"/>
                 <TextBlock x:Name="PeekTime" FontSize="12.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <!-- A live activity: timer, focus session, call, download -->
+                <StackPanel x:Name="PeekLive" Orientation="Horizontal" Visibility="Collapsed">
+                    <controls:LineIcon x:Name="PeekLiveIcon" Width="15" Height="15" Margin="0,0,7,0" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="PeekLiveLabel" MaxWidth="150" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                </StackPanel>
             </StackPanel>
             <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="0,0,18,1" VerticalAlignment="Center">
-                <StackPanel x:Name="PeekEq" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0" Visibility="Collapsed">
-                    <Rectangle x:Name="Eq1" Width="2.5" Height="4" RadiusX="1.25" RadiusY="1.25" Fill="{StaticResource AccentBrush}" Margin="0,0,2,0"/>
-                    <Rectangle x:Name="Eq2" Width="2.5" Height="4" RadiusX="1.25" RadiusY="1.25" Fill="{StaticResource AccentBrush}" Margin="0,0,2,0"/>
-                    <Rectangle x:Name="Eq3" Width="2.5" Height="4" RadiusX="1.25" RadiusY="1.25" Fill="{StaticResource AccentBrush}" Margin="0,0,2,0"/>
-                    <Rectangle x:Name="Eq4" Width="2.5" Height="4" RadiusX="1.25" RadiusY="1.25" Fill="{StaticResource AccentBrush}"/>
-                </StackPanel>
+                <TextBlock x:Name="PeekLiveValue" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" MinWidth="34"
+                           TextAlignment="Right" Typography.NumeralAlignment="Tabular" Margin="0,0,10,0" VerticalAlignment="Center" Visibility="Collapsed"/>
+                <!-- Music bars: they follow what's actually playing (the output's level), centred like a waveform -->
+                <controls:MusicBars x:Name="PeekEq" Fill="{StaticResource AccentBrush}" Margin="0,0,9,0" VerticalAlignment="Center" Visibility="Collapsed"/>
                 <!-- iOS privacy dots: green = camera, orange = microphone -->
                 <Ellipse x:Name="PeekCamDot" Width="7" Height="7" Fill="{StaticResource AccentBrush}" Margin="0,0,5,0" VerticalAlignment="Center" Visibility="Collapsed"/>
                 <Ellipse x:Name="PeekMicDot" Width="7" Height="7" Fill="{StaticResource OrangeBrush}" Margin="0,0,8,0" VerticalAlignment="Center" Visibility="Collapsed"/>
@@ -132,8 +136,8 @@
         </Grid>
 
         <!-- ═══════════ ACTIVITY: short-lived system event ═══════════ -->
-        <Grid x:Name="Activity" MinWidth="250" Height="58" HorizontalAlignment="Center" VerticalAlignment="Top"
-              Opacity="0" IsHitTestVisible="False">
+        <Grid x:Name="Activity" MinWidth="250" MinHeight="58" HorizontalAlignment="Center" VerticalAlignment="Top"
+              Opacity="0" IsHitTestVisible="False" Background="Transparent" MouseLeftButtonUp="Activity_Click">
             <Grid.RenderTransform><TranslateTransform x:Name="ActivityDrop"/></Grid.RenderTransform>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
@@ -145,10 +149,12 @@
                 <Grid>
                     <TextBlock x:Name="ActivityGlyph" Style="{StaticResource Icon}" FontSize="15" Foreground="{StaticResource TextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     <controls:LineIcon x:Name="ActivityIcon2" Width="18" Height="18" Visibility="Collapsed"/>
+                    <Image x:Name="ActivityAppIcon" Width="34" Height="34" Visibility="Collapsed" RenderOptions.BitmapScalingMode="HighQuality"/>
                 </Grid>
             </Border>
-            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,4,20,0">
-                <TextBlock x:Name="ActivityTitle" FontSize="13" FontWeight="SemiBold"/>
+            <StackPanel x:Name="ActivityText" Grid.Column="1" VerticalAlignment="Center" Margin="0,4,20,0">
+                <TextBlock x:Name="ActivityCaption" FontSize="11" Foreground="{StaticResource MutedBrush}" Margin="0,0,0,1" Visibility="Collapsed"/>
+                <TextBlock x:Name="ActivityTitle" FontSize="13" FontWeight="SemiBold" MaxWidth="300" TextTrimming="CharacterEllipsis"/>
                 <TextBlock x:Name="ActivityDetail" FontSize="11.5" Foreground="{StaticResource MutedBrush}" MaxWidth="230" TextTrimming="CharacterEllipsis"/>
             </StackPanel>
             <ProgressBar x:Name="ActivityBar" Grid.Column="2" Width="64" Style="{StaticResource StatBar}" Foreground="{StaticResource TextBrush}"
@@ -217,6 +223,35 @@
                             <TextBlock x:Name="BatteryStatus" FontSize="12.5" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="12,4,0,0"/>
                         </StackPanel>
                         <ProgressBar x:Name="BatteryBar" Style="{StaticResource StatBar}" Maximum="100" Margin="0,8,0,0"/>
+                        <DockPanel Margin="0,16,0,6">
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <Rectangle Width="8" Height="8" RadiusX="2" RadiusY="2" Fill="{StaticResource AccentBrush}" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="Plugged in" FontSize="11" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <TextBlock Text="Last 24 hours" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}"/>
+                        </DockPanel>
+                        <controls:BatteryChart x:Name="BatteryHistoryChart" Height="56" BarBrush="{StaticResource MutedBrush}" PluggedBrush="{StaticResource AccentBrush}"/>
+                        <Grid Margin="0,4,0,0">
+                            <TextBlock x:Name="BatteryChartStart" FontSize="10.5" Foreground="{StaticResource MutedBrush}"/>
+                            <TextBlock x:Name="BatteryChartMiddle" FontSize="10.5" Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Center"/>
+                            <TextBlock Text="Now" FontSize="10.5" Foreground="{StaticResource MutedBrush}" HorizontalAlignment="Right"/>
+                        </Grid>
+                        <TextBlock x:Name="BatteryChartEmpty" FontSize="11.5" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap"
+                                   Text="The chart fills in while LapDock runs: one bar per half hour." Visibility="Collapsed"/>
+                        <UniformGrid x:Name="BatteryHealthRow" Columns="3" Margin="0,14,0,0">
+                            <StackPanel>
+                                <TextBlock Text="Health" FontSize="11" Foreground="{StaticResource MutedBrush}"/>
+                                <TextBlock x:Name="BatteryHealthText" FontSize="15" FontWeight="SemiBold"/>
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Text="Full charge" FontSize="11" Foreground="{StaticResource MutedBrush}"/>
+                                <TextBlock x:Name="BatteryCapacityText" FontSize="15" FontWeight="SemiBold"/>
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock x:Name="BatteryRateLabel" Text="Power" FontSize="11" Foreground="{StaticResource MutedBrush}"/>
+                                <TextBlock x:Name="BatteryRateText" FontSize="15" FontWeight="SemiBold"/>
+                            </StackPanel>
+                        </UniformGrid>
                         <Button Content="Power &amp; battery settings" Style="{StaticResource Link}" Click="BatterySettings_Click"/>
                     </StackPanel>
 
@@ -259,6 +294,7 @@
                 <TabItem x:Name="TodayTabItem" Header="Today" Tag="today"><tabs:TodayTab x:Name="TodayPage"/></TabItem>
                 <TabItem x:Name="StatsTabItem" Header="Stats" Tag="stats"><tabs:StatsTab x:Name="StatsPage"/></TabItem>
                 <TabItem x:Name="ClipboardTabItem" Header="Clipboard" Tag="clipboard"><tabs:ClipboardTab x:Name="ClipboardPage"/></TabItem>
+                <TabItem x:Name="ShelfTabItem" Header="Shelf" Tag="shelf"><tabs:ShelfTab x:Name="ShelfPage"/></TabItem>
                 <TabItem x:Name="AppsTabItem" Header="Apps" Tag="apps"><tabs:AppsTab x:Name="AppsPage"/></TabItem>
                 <TabItem x:Name="WallpaperTabItem" Header="Wallpaper" Tag="wallpaper"><tabs:WallpaperTab x:Name="WallpaperPage"/></TabItem>
                 <TabItem x:Name="PowerTabItem" Header="Power" Tag="power"><tabs:PowerTab x:Name="PowerPage"/></TabItem>

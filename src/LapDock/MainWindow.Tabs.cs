@@ -13,7 +13,7 @@ using Forms = System.Windows.Forms;
 namespace LapDock;
 
 /// <summary>
-/// The expanded notch's tabs (Controls, Today, Stats, Clipboard, Apps, Wallpaper, Power), and the
+/// The expanded notch's tabs (Controls, Today, Stats, Clipboard, Shelf, Apps, Wallpaper, Power), and the
 /// Settings window with its ways in: the settings hotkey, the tray icon and the right-click menu.
 /// </summary>
 public partial class MainWindow
@@ -30,6 +30,8 @@ public partial class MainWindow
         ControlsPage.Attach(_audio, _settings.MediaControls ? _nowPlaying : null);
         TodayPage.Attach(_settings, Modal);
         TodayPage.Alert += OnTodayAlert;
+        TodayPage.CountdownChanged += OnCountdownChanged;
+        ShelfPage.DragOutStarted += () => SetMode(Mode.Peek); // out of the way of where the item is going
         StatsPage.Attach(_settings);
         AppsPage.Attach(_settings);
         WallpaperPage.Attach(_settings, Modal);
@@ -117,13 +119,19 @@ public partial class MainWindow
         else if (Tabs.SelectedItem == TodayTabItem) TodayPage.Refresh();
         else if (Tabs.SelectedItem == AppsTabItem) AppsPage.Refresh();
         else if (Tabs.SelectedItem == PowerTabItem) PowerPage.Refresh();
+        else if (Tabs.SelectedItem == ShelfTabItem) ShelfPage.Refresh();
         else if (Tabs.SelectedIndex == 0) ControlsPage.Refresh();
     }
 
     /// <summary>Timer finished / reminder due: in the notch, and as a Windows notification (via the tray icon).</summary>
     private void OnTodayAlert(string title, string detail)
     {
-        Notify("today", "timer", title, detail, accent: Res("AccentBrush"));
+        if (!TodayPage.Focusing && _heldNotices > 0) // a focus session just ended: what came in meanwhile
+        {
+            detail += _heldNotices == 1 ? " · 1 notification came in" : $" · {_heldNotices} notifications came in";
+            _heldNotices = 0;
+        }
+        Notify("today", TodayPage.Countdown?.Icon ?? "timer", title, detail, accent: Res("AccentBrush"), seconds: 5);
         _tray?.ShowBalloonTip(8000, title, detail, Forms.ToolTipIcon.None);
     }
 
@@ -197,6 +205,8 @@ public partial class MainWindow
 
     private void ApplySettings()
     {
+        _ = StartNoticesAsync(); // switched on in Settings
+        ApplyNotchSpace();
         PlaceOnScreen();
         UpdateClock();
         RefreshAll();
@@ -243,5 +253,5 @@ public partial class MainWindow
 
     /// <summary>Nova lives in the island: dancing while music plays (still while a fullscreen app is up), otherwise awake and blinking.</summary>
     private void UpdateNova() =>
-        PeekNova.SetMood(_settings.MediaControls && _nowPlaying.IsPlaying && !Quiet ? NovaMood.Dancing : NovaMood.Awake);
+        PeekNova.SetMood(_settings.MediaControls && _nowPlaying.IsPlaying && !Away ? NovaMood.Dancing : NovaMood.Awake);
 }
